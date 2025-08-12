@@ -1,113 +1,79 @@
 #include "AudioEngine.h"
+#include <juce_dsp/juce_dsp.h>
 
-//==============================================================================
-AudioEngine::AudioEngine()
+void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* in,
+                                                    int numIn,
+                                                    float* const* out,
+                                                    int numOut,
+                                                    int numSamples,
+                                                    const juce::AudioIODeviceCallbackContext&)
 {
-    // Initialize virtual audio device
-    virtualDevice = std::make_unique<VirtualAudioDevice>();
-}
+    if (numOut == 0) return;
 
-AudioEngine::~AudioEngine()
-{
-    releaseResources();
-}
+    for (int ch = 0; ch < numOut; ++ch)
+        juce::FloatVectorOperations::clear(out[ch], numSamples);
 
-void AudioEngine::prepareToPlay(int samplesPerBlockExpected, double sampleRate)
-{
-    currentSampleRate = sampleRate;
-    currentBlockSize = samplesPerBlockExpected;
-    
-    // Prepare smoothed values
-    inputGain.reset(sampleRate, 0.05); // 50ms smoothing
-    outputGain.reset(sampleRate, 0.05);
-    inputLevelSmoothed.reset(sampleRate, 0.1); // 100ms smoothing for meters
-    outputLevelSmoothed.reset(sampleRate, 0.1);
-    
-    // Prepare processing components
-    compressor.prepareToPlay(sampleRate, samplesPerBlockExpected);
-    limiter.prepareToPlay(sampleRate, samplesPerBlockExpected);
-    
-    // Prepare virtual audio device
-    virtualDevice->prepareToPlay(sampleRate, samplesPerBlockExpected);
-}
+    if (numIn == 0) return;
 
-void AudioEngine::processAudioBlock(juce::AudioBuffer<float>& buffer, int startSample, int numSamples)
-{
-    if (!isEnabled)
+    const float inG   = inputGain.load();
+    const float outG  = outputGain.load();
+
+    // Noise Gate parameters
+    const float gateThr = juce::Decibels::decibelsToGain(gateThreshold.load());
+    const float gateR   = juce::jmax(1.0f, gateRatio.load());
+    const float gateA   = gateAttack.load() / 1000.0f;  // convert ms to seconds
+    const float gateRel = gateRelease.load() / 1000.0f;  // convert ms to seconds
+
+    // Compressor parameters
+    const float thr   = juce::Decibels::decibelsToGain(threshDb.load());
+    const float ceilG = juce::Decibels::decibelsToGain(ceilingDb.load());
+    const float R     = juce::jmax(1.0f, ratio.load());
+
+    float pkIn = 0.0f, pkOut = 0.0f, maxGr = 0.0f;
+
+    for (int n = 0; n < numSamples; ++n)
     {
-        buffer.clear(startSample, numSamples);
-        return;
-    }
-    
-    // Create audio block for processing
-    juce::dsp::AudioBlock<float> audioBlock(buffer);
-    auto subBlock = audioBlock.getSubBlock(startSample, numSamples);
-    
-    // Measure input level
-    float currentInputLevel = 0.0f;
-    for (int channel = 0; channel < subBlock.getNumChannels(); ++channel)
-    {
-        auto channelData = subBlock.getChannelPointer(channel);
-        for (int sample = 0; sample < numSamples; ++sample)
-        {
-            currentInputLevel = juce::jmax(currentInputLevel, std::abs(channelData[sample]));
+        float x = in[0][n] * inG;           // mono from first input channel
+        pkIn = juce::jmax(pkIn, std::abs(x));
+
+        // Noise Gate processing
+        const float gateLevel = std::abs(x);
+        gateEnv = 0.99f * gateEnv + 0.01f * gateLevel;
+
+        float gateGain = 1.0f;
+        if (gateEnv < gateThr) {
+            const float under = gateThr / gateEnv;
+            const float underDb = juce::Decibels::gainToDecibels(under);
+            const float gateRedDb = underDb - (underDb / gateR);
+            gateGain = juce::Decibels::decibelsToGain(-gateRedDb);
         }
-    }
-    inputLevelSmoothed.setTargetValue(currentInputLevel);
-    inputLevel = inputLevelSmoothed.getNextValue();
-    
-    // Apply input gain
-    for (int channel = 0; channel < subBlock.getNumChannels(); ++channel)
-    {
-        auto channelData = subBlock.getChannelPointer(channel);
-        for (int sample = 0; sample < numSamples; ++sample)
-        {
-            channelData[sample] *= inputGain.getNextValue();
-        }
-    }
-    
-    // Process through compressor
-    float compressionGR = compressor.processBlock(subBlock);
-    
-    // Process through limiter
-    float limitingGR = limiter.processBlock(subBlock);
-    
-    // Combine gain reduction for metering
-    currentGainReduction = juce::jmax(compressionGR, limitingGR);
-    
-    // Apply output gain
-    for (int channel = 0; channel < subBlock.getNumChannels(); ++channel)
-    {
-        auto channelData = subBlock.getChannelPointer(channel);
-        for (int sample = 0; sample < numSamples; ++sample)
-        {
-            channelData[sample] *= outputGain.getNextValue();
-        }
-    }
-    
-    // Measure output level
-    float currentOutputLevel = 0.0f;
-    for (int channel = 0; channel < subBlock.getNumChannels(); ++channel)
-    {
-        auto channelData = subBlock.getChannelPointer(channel);
-        for (int sample = 0; sample < numSamples; ++sample)
-        {
-            currentOutputLevel = juce::jmax(currentOutputLevel, std::abs(channelData[sample]));
-        }
-    }
-    outputLevelSmoothed.setTargetValue(currentOutputLevel);
-    outputLevel = outputLevelSmoothed.getNextValue();
-    
-    // Send processed audio to virtual device
-    virtualDevice->processAudioBlock(buffer, startSample, numSamples);
-}
 
-void AudioEngine::releaseResources()
-{
-    compressor.releaseResources();
-    limiter.releaseResources();
-    
-    if (virtualDevice)
-        virtualDevice->releaseResources();
-}
+        x *= gateGain;
 
+        // detector
+        const float level = std::abs(x);
+        env = 0.99f * env + 0.01f * level;
+
+        float gain = 1.0f;
+        if (env > thr) {
+            const float over   = env / thr;
+            const float overDb = juce::Decibels::gainToDecibels(over);
+            const float redDb  = overDb - (overDb / R);   // reduction amount
+            gain = juce::Decibels::decibelsToGain(-redDb);
+            maxGr = juce::jmax(maxGr, redDb);
+        }
+
+        float y = x * gain;
+        y = juce::jlimit(-ceilG, ceilG, y);
+        y *= outG;
+
+        for (int ch = 0; ch < numOut; ++ch)
+            out[ch][n] = y;
+
+        pkOut = juce::jmax(pkOut, std::abs(y));
+    }
+
+    inPeak.store(pkIn);
+    outPeak.store(pkOut);
+    grDb.store(maxGr);
+}

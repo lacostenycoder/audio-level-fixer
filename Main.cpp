@@ -1,5 +1,22 @@
 #include <JuceHeader.h>
 #include "MainComponent.h"
+#include <juce_core/juce_core.h>
+#include <juce_gui_basics/juce_gui_basics.h>
+
+namespace {
+struct AppLogger {
+    AppLogger() {
+        auto dir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+                    .getChildFile("AudioProcessor").getChildFile("logs");
+        dir.createDirectory();
+        fileLogger.reset(new juce::FileLogger(dir.getChildFile("latest.txt"), "App start", 0));
+        juce::Logger::setCurrentLogger(fileLogger.get());
+    }
+    ~AppLogger() { juce::Logger::setCurrentLogger(nullptr); }
+    std::unique_ptr<juce::FileLogger> fileLogger;
+};
+static AppLogger __appLoggerInit;
+}
 
 //==============================================================================
 class AudioProcessorApplication : public juce::JUCEApplication

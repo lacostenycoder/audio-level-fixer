@@ -1,65 +1,51 @@
 #pragma once
+#include <juce_audio_devices/juce_audio_devices.h>
+#include <atomic>
 
-#include <JuceHeader.h>
-#include "Compressor.h"
-#include "Limiter.h"
-#include "VirtualAudioDevice.h"
-
-//==============================================================================
-class AudioEngine
+// Minimal realtime engine: input -> noise gate -> gentle comp/limiter -> output.
+// Exposes peak meters and gain reduction for UI.
+class AudioEngine : public juce::AudioIODeviceCallback
 {
 public:
-    AudioEngine();
-    ~AudioEngine();
-    
-    void prepareToPlay(int samplesPerBlockExpected, double sampleRate);
-    void processAudioBlock(juce::AudioBuffer<float>& buffer, int startSample, int numSamples);
-    void releaseResources();
-    
-    // Parameter setters
-    void setEnabled(bool enabled) { isEnabled = enabled; }
-    void setInputGain(float gainDb) { inputGain.setTargetValue(juce::Decibels::decibelsToGain(gainDb)); }
-    void setOutputGain(float gainDb) { outputGain.setTargetValue(juce::Decibels::decibelsToGain(gainDb)); }
-    
-    void setCompressorThreshold(float thresholdDb) { compressor.setThreshold(thresholdDb); }
-    void setCompressorRatio(float ratio) { compressor.setRatio(ratio); }
-    void setCompressorAttack(float attackMs) { compressor.setAttack(attackMs); }
-    void setCompressorRelease(float releaseMs) { compressor.setRelease(releaseMs); }
-    
-    void setLimiterCeiling(float ceilingDb) { limiter.setCeiling(ceilingDb); }
-    void setLimiterLookahead(float lookaheadMs) { limiter.setLookahead(lookaheadMs); }
-    
-    // Getters for metering
-    float getCurrentGainReduction() const { return currentGainReduction; }
-    float getInputLevel() const { return inputLevel; }
-    float getOutputLevel() const { return outputLevel; }
-    
-private:
-    // Processing state
-    bool isEnabled = false;
-    double currentSampleRate = 44100.0;
-    int currentBlockSize = 512;
-    
-    // Gain controls
-    juce::SmoothedValue<float> inputGain { 1.0f };
-    juce::SmoothedValue<float> outputGain { 1.0f };
-    
-    // Processing components
-    Compressor compressor;
-    Limiter limiter;
-    
-    // Virtual audio device
-    std::unique_ptr<VirtualAudioDevice> virtualDevice;
-    
-    // Metering
-    float currentGainReduction = 0.0f;
-    float inputLevel = 0.0f;
-    float outputLevel = 0.0f;
-    
-    // Level smoothing for meters
-    juce::SmoothedValue<float> inputLevelSmoothed { 0.0f };
-    juce::SmoothedValue<float> outputLevelSmoothed { 0.0f };
-    
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioEngine)
-};
+    // Parameters (hook up UI later if desired)
+    std::atomic<float> inputGain { 1.0f };     // linear
+    std::atomic<float> outputGain{ 1.0f };     // linear
 
+    // Noise Gate parameters
+    std::atomic<float> gateThreshold { -60.0f }; // dB
+    std::atomic<float> gateRatio { 10.0f };     // ratio
+    std::atomic<float> gateAttack { 1.0f };     // ms
+    std::atomic<float> gateRelease { 100.0f };  // ms
+
+    // Compressor parameters
+    std::atomic<float> threshDb  { -18.0f };
+    std::atomic<float> ratio     { 3.0f };
+    std::atomic<float> ceilingDb { -1.0f };
+
+    // Meter taps (read by UI timer)
+    std::atomic<float> inPeak  { 0.0f }; // 0..1
+    std::atomic<float> outPeak { 0.0f }; // 0..1
+    std::atomic<float> grDb    { 0.0f }; // positive reduction amount in dB
+
+    void audioDeviceAboutToStart(juce::AudioIODevice* dev) override
+    {
+        fs = dev ? dev->getCurrentSampleRate() : 48000.0;
+        env = 0.0f;
+        gateEnv = 0.0f;
+        inPeak.store(0); outPeak.store(0); grDb.store(0);
+    }
+    void audioDeviceStopped() override {}
+
+    // JUCE 8 uses this method - implement the audio processing here
+    void audioDeviceIOCallbackWithContext (const float* const* inputChannelData,
+                                           int numInputChannels,
+                                           float* const* outputChannelData,
+                                           int numOutputChannels,
+                                           int numSamples,
+                                           const juce::AudioIODeviceCallbackContext& context) override;
+
+private:
+    double fs = 48000.0;
+    float env = 0.0f; // simple peak follower
+    float gateEnv = 0.0f; // noise gate envelope follower
+};
