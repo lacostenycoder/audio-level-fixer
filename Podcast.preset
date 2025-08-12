@@ -1,0 +1,23 @@
+[Audio Processor Preset]
+Name=Podcast
+Description=Optimized for spoken word content with consistent levels
+
+[Input]
+Gain=6.0
+
+[Compressor]
+Enabled=true
+Threshold=-24.0
+Ratio=6.0
+Attack=1.0
+Release=50.0
+
+[Limiter]
+Enabled=true
+Ceiling=-1.0
+Lookahead=3.0
+Release=200.0
+
+[Output]
+Gain=-2.0
+

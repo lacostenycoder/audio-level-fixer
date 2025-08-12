@@ -1,0 +1,23 @@
+[Audio Processor Preset]
+Name=Voice Over
+Description=Professional voice recording with transparent processing
+
+[Input]
+Gain=2.0
+
+[Compressor]
+Enabled=true
+Threshold=-22.0
+Ratio=3.0
+Attack=2.0
+Release=100.0
+
+[Limiter]
+Enabled=true
+Ceiling=-0.3
+Lookahead=5.0
+Release=500.0
+
+[Output]
+Gain=-1.0
+

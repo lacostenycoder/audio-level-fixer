@@ -1,0 +1,23 @@
+[Audio Processor Preset]
+Name=Default
+Description=Balanced settings for general use
+
+[Input]
+Gain=0.0
+
+[Compressor]
+Enabled=true
+Threshold=-20.0
+Ratio=4.0
+Attack=1.0
+Release=30.0
+
+[Limiter]
+Enabled=true
+Ceiling=-0.3
+Lookahead=3.0
+Release=300.0
+
+[Output]
+Gain=0.0
+

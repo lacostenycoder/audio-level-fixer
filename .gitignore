@@ -1,0 +1,126 @@
+# Build directories
+build/
+Build/
+bin/
+obj/
+out/
+debug/
+release/
+x64/
+x86/
+Debug/
+Release/
+MinSizeRel/
+RelWithDebInfo/
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+
+# Compiled binaries
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+*.exp
+*.ilk
+*.pdb
+*.map
+
+# Object files
+*.o
+*.obj
+
+# Visual Studio files
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.sln
+*.suo
+*.user
+*.aps
+*.pch
+*.vspscc
+*_i.c
+*_p.c
+*.ncb
+*.tlb
+*.tlh
+*.bak
+*.cache
+*.ilk
+*.log
+[Bb]in
+[Dd]ebug*/
+*.sbr
+*.sdf
+*.opensdf
+*.unsuccessfulbuild
+ipch/
+*.idb
+*.embed.manifest
+*.embed.manifest.res
+*.intermediate.manifest
+*.res
+.vs/
+
+# Code::Blocks
+*.layout
+*.depend
+
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+DerivedData/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+# Linux
+*~
+*.swp
+*.swo
+
+# Windows
+Thumbs.db
+*.tmp
+*.temp
+nul
+
+# IDE files
+.vscode/
+.idea/
+*.sublime-*
+
+# Audio files (samples/temp)
+*.wav
+*.mp3
+*.flac
+*.aiff
+*.m4a
+
+# Log files
+*.log
+
+# Installer files
+*.msi
+*.dmg
+*.pkg
+*.deb
+*.rpm
+
+# Temporary files
+*~
+*.bak
+*.tmp
+*.temp

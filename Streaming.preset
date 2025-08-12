@@ -1,0 +1,23 @@
+[Audio Processor Preset]
+Name=Streaming
+Description=Fast response for live streaming with dynamic content
+
+[Input]
+Gain=3.0
+
+[Compressor]
+Enabled=true
+Threshold=-18.0
+Ratio=3.0
+Attack=0.5
+Release=20.0
+
+[Limiter]
+Enabled=true
+Ceiling=-0.5
+Lookahead=2.0
+Release=100.0
+
+[Output]
+Gain=0.0
+
