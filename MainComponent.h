@@ -18,8 +18,9 @@ private:
     juce::String meterName;
     float currentValue = 0.0f;
     float peakValue = 0.0f;
-    int peakHoldCounter = 0;
-    static constexpr int peakHoldTime = 30; // frames at 30fps = 1 second
+    double lastUpdateTime = 0.0;
+    float peakHoldTime = 1.0f; // seconds
+    float peakDecayPerSecond = 0.5f; // units per second
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioMeter)
 };

@@ -3,21 +3,6 @@
 #include <juce_core/juce_core.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
-namespace {
-struct AppLogger {
-    AppLogger() {
-        auto dir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-                    .getChildFile("AudioProcessor").getChildFile("logs");
-        dir.createDirectory();
-        fileLogger.reset(new juce::FileLogger(dir.getChildFile("latest.txt"), "App start", 0));
-        juce::Logger::setCurrentLogger(fileLogger.get());
-    }
-    ~AppLogger() { juce::Logger::setCurrentLogger(nullptr); }
-    std::unique_ptr<juce::FileLogger> fileLogger;
-};
-static AppLogger __appLoggerInit;
-}
-
 //==============================================================================
 class AudioProcessorApplication : public juce::JUCEApplication
 {
@@ -32,12 +17,23 @@ public:
     //==============================================================================
     void initialise (const juce::String& commandLine) override
     {
+        // Setup file logging
+        auto dir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+                    .getChildFile("AudioProcessor").getChildFile("logs");
+        dir.createDirectory();
+        fileLogger.reset(new juce::FileLogger(dir.getChildFile("latest.txt"), "App start", 0));
+        juce::Logger::setCurrentLogger(fileLogger.get());
+
         // This method is where you should put your application's initialisation code..
         mainWindow.reset (new MainWindow (getApplicationName()));
     }
 
     void shutdown() override
     {
+        // Cleanup logging
+        juce::Logger::setCurrentLogger(nullptr);
+        fileLogger.reset();
+
         // Add your application's shutdown code here..
         mainWindow = nullptr; // (deletes our window)
     }
@@ -105,6 +101,7 @@ public:
 
 private:
     std::unique_ptr<MainWindow> mainWindow;
+    std::unique_ptr<juce::FileLogger> fileLogger;
 };
 
 //==============================================================================

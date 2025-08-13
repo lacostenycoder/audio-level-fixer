@@ -1,9 +1,9 @@
 [Audio Processor Preset]
-Name=VoiceOver
-Description=Optimized for voice over work with clear articulation
+Name=SlammedUp
+Description=Mega Boost for Weak Ass Mics
 
 [Input]
-Gain=12.0
+Gain=10.0
 
 [NoiseGate]
 Enabled=true
@@ -14,19 +14,19 @@ Release=80.0
 
 [Compressor]
 Enabled=true
-Threshold=-16.0
-Ratio=8.0
+Threshold=-18.0
+Ratio=3.0
 Attack=0.5
-Release=25.0
+Release=20.0
 Knee=1.5
 
 [Limiter]
 Enabled=true
-Ceiling=-0.5
+Ceiling=-1.66
 Lookahead=5.0
-Release=150.0
+Release=100.0
 
 [Output]
-Gain=-2.0
+Gain=0.0
 MakeupGain=4.0
 

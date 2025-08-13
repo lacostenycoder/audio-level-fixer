@@ -3,24 +3,39 @@
 // AudioMeter implementation
 AudioMeter::AudioMeter(const juce::String& name) : meterName(name)
 {
+    lastUpdateTime = juce::Time::getMillisecondCounterHiRes();
 }
 
 void AudioMeter::setValue(float newValue)
 {
     currentValue = newValue;
+
+    double now = juce::Time::getMillisecondCounterHiRes();
+    double elapsedSeconds = (now - lastUpdateTime) * 0.001;
+    lastUpdateTime = now;
+
     if (newValue > peakValue)
     {
         peakValue = newValue;
-        peakHoldCounter = peakHoldTime;
-    }
-    else if (peakHoldCounter > 0)
-    {
-        peakHoldCounter--;
+        peakHoldTime = 1.0f; // Reset hold time
     }
     else
     {
-        peakValue *= 0.95f; // decay peak
+        // Decrease hold time
+        peakHoldTime -= elapsedSeconds;
+        if (peakHoldTime < 0)
+            peakHoldTime = 0;
     }
+
+    // Decay peak value if hold time has expired
+    if (peakHoldTime <= 0)
+    {
+        // Decay peakValue at a rate of peakDecayPerSecond per second
+        peakValue -= peakDecayPerSecond * elapsedSeconds;
+        if (peakValue < currentValue)
+            peakValue = currentValue;
+    }
+
     repaint();
 }
 
@@ -534,9 +549,12 @@ void MainComponent::timerCallback()
     lastOut = engine.outPeak.load();
     lastGR  = engine.grDb.load();
 
-    // Update meters
-    inputMeter->setValue(lastIn);
-    outputMeter->setValue(lastOut);
+    // Update meters with clamped values
+    float clampedIn  = juce::jlimit(0.0f, 1.0f, lastIn);
+    float clampedOut = juce::jlimit(0.0f, 1.0f, lastOut);
+
+    inputMeter->setValue(clampedIn);
+    outputMeter->setValue(clampedOut);
     gainReductionMeter->setValue(lastGR / 20.0f); // Normalize to 0-1 range
 
     repaint();

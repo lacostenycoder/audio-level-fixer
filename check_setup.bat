@@ -7,7 +7,7 @@ if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" set "INNO_PATH=%ProgramFile
 if exist "%ProgramFiles%\Inno Setup 6\ISCC.exe"      set "INNO_PATH=%ProgramFiles%\Inno Setup 6\ISCC.exe"
 if "%INNO_PATH%"=="" (
   echo Inno Setup not found. Skipping installer tests.
-  exit /b 0
+  exit /b 1
 )
 echo Inno Setup found at: %INNO_PATH%
 exit /b 0

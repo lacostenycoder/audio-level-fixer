@@ -35,20 +35,20 @@ if(NOT JUCE_FOUND)
         message(STATUS "Using JUCE from system installation")
     else()
         message(FATAL_ERROR "JUCE not found! Please install JUCE framework.
-        
+
 Download JUCE from: https://juce.com/get-juce/download
 Extract it to one of these locations:
   - C:/JUCE/
   - C:/Program Files/JUCE/
   - ${CMAKE_CURRENT_SOURCE_DIR}/../JUCE/
-  
+
 Or set JUCE_DIR to your JUCE installation path.")
     endif()
 endif()
 
 # Create the main application target
 juce_add_gui_app(AudioProcessor
-    PRODUCT_NAME "Audio Processor"
+    PRODUCT_NAME "AudioProcessor"
     COMPANY_NAME "Manus AI"
     VERSION "1.0.0"
     BUNDLE_ID "com.manusai.audioprocessor"
@@ -117,11 +117,11 @@ elseif(UNIX)
         JUCE_ALSA=1
         JUCE_JACK=1
     )
-    
+
     # Find and link JACK library
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(JACK REQUIRED jack)
-    
+
     target_include_directories(AudioProcessor PRIVATE ${JACK_INCLUDE_DIRS})
     target_link_libraries(AudioProcessor PRIVATE ${JACK_LIBRARIES})
     target_compile_options(AudioProcessor PRIVATE ${JACK_CFLAGS_OTHER})
