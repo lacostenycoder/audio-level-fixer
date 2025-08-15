@@ -485,15 +485,15 @@ void MainComponent::loadPreset(const juce::String& presetName)
     {
         inputGainSlider.setValue(10.0);  // Input Gain=10.0
         outputGainSlider.setValue(1.0);  // Output Gain=0.0 but using 1.0 as base
-        gateThresholdSlider.setValue(-40.0);  // NoiseGate Threshold=-40.0
-        gateRatioSlider.setValue(25.0);  // NoiseGate Ratio=25.0
-        gateAttackSlider.setValue(0.5);  // NoiseGate Attack=0.5
-        gateReleaseSlider.setValue(80.0);  // NoiseGate Release=80.0
+        gateThresholdSlider.setValue(-44.0);  // NoiseGate Threshold=-40.0
+        gateRatioSlider.setValue(21.0);  // NoiseGate Ratio=21.0
+        gateAttackSlider.setValue(0.1);  // NoiseGate Attack=0.1
+        gateReleaseSlider.setValue(400.0);  // NoiseGate Release=400.0
         thresholdSlider.setValue(-18.0);  // Compressor Threshold=-18.0
-        ratioSlider.setValue(3.0);  // Compressor Ratio=3.0
-        attackSlider.setValue(0.5);  // Compressor Attack=0.5
-        releaseSlider.setValue(20.0);  // Compressor Release=20.0
-        ceilingSlider.setValue(-1.66);  // Limiter Ceiling=-1.66
+        ratioSlider.setValue(3.6);  // Compressor Ratio=3.0
+        attackSlider.setValue(0.2);  // Compressor Attack=0.5
+        releaseSlider.setValue(175.0);  // Compressor Release=20.0
+        ceilingSlider.setValue(-1.5);  // Limiter Ceiling=-1.66
         lookaheadSlider.setValue(5.0);  // Limiter Lookahead=5.0
         kneeSlider.setValue(1.5);  // Compressor Knee=1.5
         makeupGainSlider.setValue(4.0);  // MakeupGain=4.0

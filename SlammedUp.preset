@@ -7,26 +7,26 @@ Gain=10.0
 
 [NoiseGate]
 Enabled=true
-Threshold=-40.0
-Ratio=25.0
-Attack=0.5
-Release=80.0
+Threshold=-44.5
+Ratio=21.0
+Attack=0.1000
+Release=400.0
 
 [Compressor]
 Enabled=true
-Threshold=-18.0
-Ratio=3.0
-Attack=0.5
-Release=20.0
-Knee=1.5
+Threshold=-18.00
+Ratio=3.641
+Attack=0.2
+Release=175.0
+Knee=5.0
 
 [Limiter]
 Enabled=true
-Ceiling=-1.66
+Ceiling=-1.5
 Lookahead=5.0
 Release=100.0
 
 [Output]
-Gain=0.0
-MakeupGain=4.0
+Gain=4.70
+MakeupGain=4.00
 
