@@ -92,6 +92,10 @@ private:
     void updateEngineParameters();
     void loadPreset(const juce::String& presetName);
     void savePreset(const juce::String& presetName);
+    
+    // Helper methods for file-based preset management
+    bool loadPresetFromFile(const juce::String& presetName);
+    juce::File getPresetFile(const juce::String& presetName);
 
     void timerCallback() override;
 

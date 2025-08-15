@@ -369,6 +369,7 @@ void MainComponent::setupPresets()
     presetBox.addItem("Podcast", 2);
     presetBox.addItem("Streaming", 3);
     presetBox.addItem("VoiceOver", 4);
+    presetBox.addItem("SlammedUp", 5);
     presetBox.setSelectedId(1, juce::dontSendNotification);
 }
 
@@ -404,6 +405,14 @@ void MainComponent::updateEngineParameters()
 
 void MainComponent::loadPreset(const juce::String& presetName)
 {
+    // First try to load from file, if that fails use hardcoded values
+    if (loadPresetFromFile(presetName))
+    {
+        updateEngineParameters();
+        return;
+    }
+    
+    // Fallback to hardcoded presets
     if (presetName == "Default")
     {
         inputGainSlider.setValue(1.0);
@@ -472,14 +481,84 @@ void MainComponent::loadPreset(const juce::String& presetName)
         kneeSlider.setValue(1.5);
         makeupGainSlider.setValue(4.0);
     }
+    else if (presetName == "SlammedUp")
+    {
+        inputGainSlider.setValue(10.0);  // Input Gain=10.0
+        outputGainSlider.setValue(1.0);  // Output Gain=0.0 but using 1.0 as base
+        gateThresholdSlider.setValue(-40.0);  // NoiseGate Threshold=-40.0
+        gateRatioSlider.setValue(25.0);  // NoiseGate Ratio=25.0
+        gateAttackSlider.setValue(0.5);  // NoiseGate Attack=0.5
+        gateReleaseSlider.setValue(80.0);  // NoiseGate Release=80.0
+        thresholdSlider.setValue(-18.0);  // Compressor Threshold=-18.0
+        ratioSlider.setValue(3.0);  // Compressor Ratio=3.0
+        attackSlider.setValue(0.5);  // Compressor Attack=0.5
+        releaseSlider.setValue(20.0);  // Compressor Release=20.0
+        ceilingSlider.setValue(-1.66);  // Limiter Ceiling=-1.66
+        lookaheadSlider.setValue(5.0);  // Limiter Lookahead=5.0
+        kneeSlider.setValue(1.5);  // Compressor Knee=1.5
+        makeupGainSlider.setValue(4.0);  // MakeupGain=4.0
+    }
 
     updateEngineParameters();
 }
 
 void MainComponent::savePreset(const juce::String& presetName)
 {
-    // This would save to a file in a real implementation
-    juce::Logger::writeToLog("Saving preset: " + presetName);
+    if (presetName.isEmpty())
+    {
+        juce::Logger::writeToLog("Error: Cannot save preset with empty name");
+        return;
+    }
+    
+    auto presetFile = getPresetFile(presetName);
+    
+    juce::String presetContent;
+    presetContent += "[Audio Processor Preset]\n";
+    presetContent += "Name=" + presetName + "\n";
+    presetContent += "Description=User created preset\n";
+    presetContent += "\n";
+    
+    presetContent += "[Input]\n";
+    presetContent += "Gain=" + juce::String(inputGainSlider.getValue()) + "\n";
+    presetContent += "\n";
+    
+    presetContent += "[NoiseGate]\n";
+    presetContent += "Enabled=true\n";
+    presetContent += "Threshold=" + juce::String(gateThresholdSlider.getValue()) + "\n";
+    presetContent += "Ratio=" + juce::String(gateRatioSlider.getValue()) + "\n";
+    presetContent += "Attack=" + juce::String(gateAttackSlider.getValue()) + "\n";
+    presetContent += "Release=" + juce::String(gateReleaseSlider.getValue()) + "\n";
+    presetContent += "\n";
+    
+    presetContent += "[Compressor]\n";
+    presetContent += "Enabled=true\n";
+    presetContent += "Threshold=" + juce::String(thresholdSlider.getValue()) + "\n";
+    presetContent += "Ratio=" + juce::String(ratioSlider.getValue()) + "\n";
+    presetContent += "Attack=" + juce::String(attackSlider.getValue()) + "\n";
+    presetContent += "Release=" + juce::String(releaseSlider.getValue()) + "\n";
+    presetContent += "Knee=" + juce::String(kneeSlider.getValue()) + "\n";
+    presetContent += "\n";
+    
+    presetContent += "[Limiter]\n";
+    presetContent += "Enabled=true\n";
+    presetContent += "Ceiling=" + juce::String(ceilingSlider.getValue()) + "\n";
+    presetContent += "Lookahead=" + juce::String(lookaheadSlider.getValue()) + "\n";
+    presetContent += "Release=" + juce::String(releaseSlider.getValue()) + "\n";
+    presetContent += "\n";
+    
+    presetContent += "[Output]\n";
+    presetContent += "Gain=0.0\n";  // This seems to be always 0.0 in the preset files
+    presetContent += "MakeupGain=" + juce::String(makeupGainSlider.getValue()) + "\n";
+    presetContent += "\n";
+    
+    if (presetFile.replaceWithText(presetContent))
+    {
+        juce::Logger::writeToLog("Preset saved successfully: " + presetFile.getFullPathName());
+    }
+    else
+    {
+        juce::Logger::writeToLog("Error saving preset: " + presetFile.getFullPathName());
+    }
 }
 
 void MainComponent::refreshDeviceLists()
@@ -558,4 +637,101 @@ void MainComponent::timerCallback()
     gainReductionMeter->setValue(lastGR / 20.0f); // Normalize to 0-1 range
 
     repaint();
+}
+
+bool MainComponent::loadPresetFromFile(const juce::String& presetName)
+{
+    auto presetFile = getPresetFile(presetName);
+    
+    if (!presetFile.exists())
+    {
+        juce::Logger::writeToLog("Preset file not found: " + presetFile.getFullPathName());
+        return false;
+    }
+    
+    auto fileContent = presetFile.loadFileAsString();
+    auto lines = juce::StringArray::fromLines(fileContent);
+    
+    juce::String currentSection;
+    
+    for (auto line : lines)
+    {
+        line = line.trim();
+        
+        // Skip empty lines and comments
+        if (line.isEmpty() || line.startsWith("#") || line.startsWith(";"))
+            continue;
+            
+        // Check for section headers
+        if (line.startsWith("[") && line.endsWith("]"))
+        {
+            currentSection = line.substring(1, line.length() - 1);
+            continue;
+        }
+        
+        // Parse key=value pairs
+        auto equalsIndex = line.indexOfChar('=');
+        if (equalsIndex == -1)
+            continue;
+            
+        auto key = line.substring(0, equalsIndex).trim();
+        auto value = line.substring(equalsIndex + 1).trim();
+        
+        // Apply values based on section and key
+        if (currentSection == "Input")
+        {
+            if (key == "Gain")
+                inputGainSlider.setValue(value.getDoubleValue());
+        }
+        else if (currentSection == "NoiseGate")
+        {
+            if (key == "Threshold")
+                gateThresholdSlider.setValue(value.getDoubleValue());
+            else if (key == "Ratio")
+                gateRatioSlider.setValue(value.getDoubleValue());
+            else if (key == "Attack")
+                gateAttackSlider.setValue(value.getDoubleValue());
+            else if (key == "Release")
+                gateReleaseSlider.setValue(value.getDoubleValue());
+        }
+        else if (currentSection == "Compressor")
+        {
+            if (key == "Threshold")
+                thresholdSlider.setValue(value.getDoubleValue());
+            else if (key == "Ratio")
+                ratioSlider.setValue(value.getDoubleValue());
+            else if (key == "Attack")
+                attackSlider.setValue(value.getDoubleValue());
+            else if (key == "Release")
+                releaseSlider.setValue(value.getDoubleValue());
+            else if (key == "Knee")
+                kneeSlider.setValue(value.getDoubleValue());
+        }
+        else if (currentSection == "Limiter")
+        {
+            if (key == "Ceiling")
+                ceilingSlider.setValue(value.getDoubleValue());
+            else if (key == "Lookahead")
+                lookaheadSlider.setValue(value.getDoubleValue());
+            else if (key == "Release")
+                ; // Limiter release is handled by releaseSlider which is already set in Compressor section
+        }
+        else if (currentSection == "Output")
+        {
+            if (key == "Gain")
+                outputGainSlider.setValue(value.getDoubleValue() == 0.0 ? 1.0 : value.getDoubleValue());
+            else if (key == "MakeupGain")
+                makeupGainSlider.setValue(value.getDoubleValue());
+        }
+    }
+    
+    juce::Logger::writeToLog("Loaded preset from file: " + presetFile.getFullPathName());
+    return true;
+}
+
+juce::File MainComponent::getPresetFile(const juce::String& presetName)
+{
+    // Look for preset file in the current application directory
+    auto currentDir = juce::File::getCurrentWorkingDirectory();
+    return currentDir.getChildFile(presetName + ".preset");
 }
