@@ -1,77 +1,103 @@
 #pragma once
-
-#include <JuceHeader.h>
+#include <juce_gui_extra/juce_gui_extra.h>
+#include <juce_audio_devices/juce_audio_devices.h>
 #include "AudioEngine.h"
+#include "Compressor.h"
+#include "Limiter.h"
 
-//==============================================================================
-class MainComponent : public juce::AudioAppComponent,
-                      public juce::Timer
+// Custom audio meter with green/yellow/red colors
+class AudioMeter : public juce::Component
 {
 public:
-    //==============================================================================
+    AudioMeter(const juce::String& name);
+    void setValue(float newValue);
+    void paint(juce::Graphics& g) override;
+    void resized() override;
+
+private:
+    juce::String meterName;
+    float currentValue = 0.0f;
+    float peakValue = 0.0f;
+    double lastUpdateTime = 0.0;
+    float peakHoldTime = 1.0f; // seconds
+    float peakDecayPerSecond = 0.5f; // units per second
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioMeter)
+};
+
+class MainComponent : public juce::Component,
+                      private juce::Timer
+{
+public:
     MainComponent();
     ~MainComponent() override;
 
-    //==============================================================================
-    void prepareToPlay (int samplesPerBlockExpected, double sampleRate) override;
-    void getNextAudioBlock (const juce::AudioSourceChannelInfo& bufferToFill) override;
-    void releaseResources() override;
-
-    //==============================================================================
-    void paint (juce::Graphics& g) override;
+    void paint(juce::Graphics&) override;
     void resized() override;
 
-    //==============================================================================
+private:
+    // Device controls
+    juce::ComboBox inputDeviceBox, outputDeviceBox;
+    juce::TextButton enableButton { "Enable Processing" };
+
+    // Audio processing controls - all vertical sliders
+    juce::Slider inputGainSlider, outputGainSlider;
+
+    // Noise Gate controls
+    juce::Slider gateThresholdSlider, gateRatioSlider, gateAttackSlider, gateReleaseSlider;
+
+    // Compressor controls
+    juce::Slider thresholdSlider, ratioSlider, attackSlider, releaseSlider;
+
+    // Limiter controls
+    juce::Slider ceilingSlider, lookaheadSlider;
+
+    // Additional controls
+    juce::Slider kneeSlider, makeupGainSlider;
+
+    // Labels for sliders
+    juce::Label inputGainLabel, outputGainLabel;
+    juce::Label gateThresholdLabel, gateRatioLabel, gateAttackLabel, gateReleaseLabel;
+    juce::Label thresholdLabel, ratioLabel, attackLabel, releaseLabel;
+    juce::Label ceilingLabel, lookaheadLabel;
+    juce::Label kneeLabel, makeupGainLabel;
+
+    // Preset management
+    juce::ComboBox presetBox;
+    juce::TextButton savePresetButton { "Save Preset" };
+    juce::TextButton loadPresetButton { "Load Preset" };
+
+    // Custom meters
+    std::unique_ptr<AudioMeter> inputMeter;
+    std::unique_ptr<AudioMeter> outputMeter;
+    std::unique_ptr<AudioMeter> gainReductionMeter;
+
+    // Values you can pipe into your on-screen meter components
+    float lastIn = 0.f, lastOut = 0.f, lastGR = 0.f;
+
+    juce::AudioDeviceManager deviceManager;
+    AudioEngine engine;
+    Compressor compressor;
+    Limiter limiter;
+    bool processingOn = false;
+
+    void refreshDeviceLists();
+    void setInputDevice(const juce::String& name);
+    void setOutputDevice(const juce::String& name);
+    void toggleProcessing();
+
+    void setupSliders();
+    void setupLabels();
+    void setupPresets();
+    void updateEngineParameters();
+    void loadPreset(const juce::String& presetName);
+    void savePreset(const juce::String& presetName);
+    
+    // Helper methods for file-based preset management
+    bool loadPresetFromFile(const juce::String& presetName);
+    juce::File getPresetFile(const juce::String& presetName);
+
     void timerCallback() override;
 
-private:
-    //==============================================================================
-    // Audio processing
-    std::unique_ptr<AudioEngine> audioEngine;
-    
-    // GUI Components
-    juce::GroupComponent inputGroup, processingGroup, outputGroup;
-    
-    // Input controls
-    juce::Slider inputGainSlider;
-    juce::Label inputGainLabel;
-    juce::ComboBox inputDeviceCombo;
-    juce::Label inputDeviceLabel;
-    
-    // Processing controls
-    juce::Slider compressorThresholdSlider, compressorRatioSlider;
-    juce::Slider compressorAttackSlider, compressorReleaseSlider;
-    juce::Label compressorThresholdLabel, compressorRatioLabel;
-    juce::Label compressorAttackLabel, compressorReleaseLabel;
-    
-    juce::Slider limiterCeilingSlider, limiterLookaheadSlider;
-    juce::Label limiterCeilingLabel, limiterLookaheadLabel;
-    
-    // Output controls
-    juce::Slider outputGainSlider;
-    juce::Label outputGainLabel;
-    juce::ComboBox outputDeviceCombo;
-    juce::Label outputDeviceLabel;
-    
-    // Level meters
-    juce::Rectangle<int> inputMeterBounds, outputMeterBounds, grMeterBounds;
-    float inputLevel = 0.0f, outputLevel = 0.0f, gainReduction = 0.0f;
-    
-    // Control buttons
-    juce::TextButton enableButton;
-    juce::TextButton presetButton;
-    
-    // Preset management
-    juce::ComboBox presetCombo;
-    juce::Label presetLabel;
-    
-    void setupSlider(juce::Slider& slider, juce::Label& label, const juce::String& labelText,
-                     double min, double max, double defaultValue, const juce::String& suffix = "");
-    void setupComboBox(juce::ComboBox& combo, juce::Label& label, const juce::String& labelText);
-    void updateDeviceLists();
-    void loadPreset(int presetIndex);
-    void saveCurrentAsPreset();
-    
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };
-

@@ -1,23 +1,32 @@
 [Audio Processor Preset]
 Name=Streaming
-Description=Fast response for live streaming with dynamic content
+Description=Optimized for streaming content with dynamic range control
 
 [Input]
-Gain=3.0
+Gain=8.0
+
+[NoiseGate]
+Enabled=true
+Threshold=-45.0
+Ratio=20.0
+Attack=1.5
+Release=120.0
 
 [Compressor]
 Enabled=true
-Threshold=-18.0
-Ratio=3.0
-Attack=0.5
-Release=20.0
+Threshold=-20.0
+Ratio=6.0
+Attack=1.5
+Release=40.0
+Knee=2.5
 
 [Limiter]
 Enabled=true
-Ceiling=-0.5
-Lookahead=2.0
-Release=100.0
+Ceiling=-1.5
+Lookahead=4.0
+Release=200.0
 
 [Output]
-Gain=0.0
+Gain=-1.0
+MakeupGain=3.0
 

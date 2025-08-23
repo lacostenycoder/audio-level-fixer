@@ -5,12 +5,20 @@ Description=Balanced settings for general use
 [Input]
 Gain=0.0
 
+[NoiseGate]
+Enabled=true
+Threshold=-60.0
+Ratio=10.0
+Attack=1.0
+Release=100.0
+
 [Compressor]
 Enabled=true
 Threshold=-20.0
 Ratio=4.0
 Attack=1.0
 Release=30.0
+Knee=2.0
 
 [Limiter]
 Enabled=true
@@ -20,4 +28,5 @@ Release=300.0
 
 [Output]
 Gain=0.0
+MakeupGain=0.0
 

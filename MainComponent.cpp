@@ -1,376 +1,737 @@
 #include "MainComponent.h"
 
-//==============================================================================
-MainComponent::MainComponent()
+// AudioMeter implementation
+AudioMeter::AudioMeter(const juce::String& name) : meterName(name)
 {
-    // Initialize audio engine
-    audioEngine = std::make_unique<AudioEngine>();
-    
-    // Setup GUI components
-    addAndMakeVisible(inputGroup);
-    inputGroup.setText("Input");
-    inputGroup.setTextLabelPosition(juce::Justification::centredTop);
-    
-    addAndMakeVisible(processingGroup);
-    processingGroup.setText("Processing");
-    processingGroup.setTextLabelPosition(juce::Justification::centredTop);
-    
-    addAndMakeVisible(outputGroup);
-    outputGroup.setText("Output");
-    outputGroup.setTextLabelPosition(juce::Justification::centredTop);
-    
-    // Input controls
-    setupSlider(inputGainSlider, inputGainLabel, "Input Gain", -40.0, 40.0, 0.0, " dB");
-    setupComboBox(inputDeviceCombo, inputDeviceLabel, "Input Device");
-    
-    // Compressor controls
-    setupSlider(compressorThresholdSlider, compressorThresholdLabel, "Threshold", -60.0, 0.0, -20.0, " dB");
-    setupSlider(compressorRatioSlider, compressorRatioLabel, "Ratio", 1.0, 20.0, 4.0, ":1");
-    setupSlider(compressorAttackSlider, compressorAttackLabel, "Attack", 0.1, 100.0, 1.0, " ms");
-    setupSlider(compressorReleaseSlider, compressorReleaseLabel, "Release", 1.0, 1000.0, 30.0, " ms");
-    
-    // Limiter controls
-    setupSlider(limiterCeilingSlider, limiterCeilingLabel, "Ceiling", -10.0, 0.0, -0.3, " dB");
-    setupSlider(limiterLookaheadSlider, limiterLookaheadLabel, "Lookahead", 0.1, 10.0, 3.0, " ms");
-    
-    // Output controls
-    setupSlider(outputGainSlider, outputGainLabel, "Output Gain", -40.0, 40.0, 0.0, " dB");
-    setupComboBox(outputDeviceCombo, outputDeviceLabel, "Output Device");
-    
-    // Control buttons
-    addAndMakeVisible(enableButton);
-    enableButton.setButtonText("Enable Processing");
-    enableButton.setToggleable(true);
-    enableButton.onClick = [this]() {
-        audioEngine->setEnabled(enableButton.getToggleState());
-        enableButton.setButtonText(enableButton.getToggleState() ? "Disable Processing" : "Enable Processing");
-    };
-    
-    // Preset management
-    setupComboBox(presetCombo, presetLabel, "Preset");
-    presetCombo.addItem("Default", 1);
-    presetCombo.addItem("Podcast", 2);
-    presetCombo.addItem("Streaming", 3);
-    presetCombo.addItem("Voice Over", 4);
-    presetCombo.setSelectedId(1);
-    presetCombo.onChange = [this]() { loadPreset(presetCombo.getSelectedId()); };
-    
-    addAndMakeVisible(presetButton);
-    presetButton.setButtonText("Save Preset");
-    presetButton.onClick = [this]() { saveCurrentAsPreset(); };
-    
-    // Setup parameter listeners
-    inputGainSlider.onValueChange = [this]() {
-        audioEngine->setInputGain(static_cast<float>(inputGainSlider.getValue()));
-    };
-    
-    compressorThresholdSlider.onValueChange = [this]() {
-        audioEngine->setCompressorThreshold(static_cast<float>(compressorThresholdSlider.getValue()));
-    };
-    
-    compressorRatioSlider.onValueChange = [this]() {
-        audioEngine->setCompressorRatio(static_cast<float>(compressorRatioSlider.getValue()));
-    };
-    
-    compressorAttackSlider.onValueChange = [this]() {
-        audioEngine->setCompressorAttack(static_cast<float>(compressorAttackSlider.getValue()));
-    };
-    
-    compressorReleaseSlider.onValueChange = [this]() {
-        audioEngine->setCompressorRelease(static_cast<float>(compressorReleaseSlider.getValue()));
-    };
-    
-    limiterCeilingSlider.onValueChange = [this]() {
-        audioEngine->setLimiterCeiling(static_cast<float>(limiterCeilingSlider.getValue()));
-    };
-    
-    limiterLookaheadSlider.onValueChange = [this]() {
-        audioEngine->setLimiterLookahead(static_cast<float>(limiterLookaheadSlider.getValue()));
-    };
-    
-    outputGainSlider.onValueChange = [this]() {
-        audioEngine->setOutputGain(static_cast<float>(outputGainSlider.getValue()));
-    };
-    
-    // Update device lists
-    updateDeviceLists();
-    
-    // Set window size
-    setSize(800, 600);
-    
-    // Start timer for level meter updates
-    startTimer(50); // 20 FPS
-    
-    // Some platforms require permissions to open input channels so request that here
-    if (juce::RuntimePermissions::isRequired (juce::RuntimePermissions::recordAudio)
-        && ! juce::RuntimePermissions::isGranted (juce::RuntimePermissions::recordAudio))
+    lastUpdateTime = juce::Time::getMillisecondCounterHiRes();
+}
+
+void AudioMeter::setValue(float newValue)
+{
+    currentValue = newValue;
+
+    double now = juce::Time::getMillisecondCounterHiRes();
+    double elapsedSeconds = (now - lastUpdateTime) * 0.001;
+    lastUpdateTime = now;
+
+    if (newValue > peakValue)
     {
-        juce::RuntimePermissions::request (juce::RuntimePermissions::recordAudio,
-                                           [&] (bool granted) { setAudioChannels (granted ? 2 : 0, 2); });
+        peakValue = newValue;
+        peakHoldTime = 1.0f; // Reset hold time
     }
     else
     {
-        // Specify the number of input and output channels that we want to open
-        setAudioChannels (2, 2);
+        // Decrease hold time
+        peakHoldTime -= elapsedSeconds;
+        if (peakHoldTime < 0)
+            peakHoldTime = 0;
     }
+
+    // Decay peak value if hold time has expired
+    if (peakHoldTime <= 0)
+    {
+        // Decay peakValue at a rate of peakDecayPerSecond per second
+        peakValue -= peakDecayPerSecond * elapsedSeconds;
+        if (peakValue < currentValue)
+            peakValue = currentValue;
+    }
+
+    repaint();
+}
+
+void AudioMeter::paint(juce::Graphics& g)
+{
+    auto bounds = getLocalBounds().toFloat();
+
+    // Background
+    g.setColour(juce::Colours::black);
+    g.fillRect(bounds);
+
+    // Border
+    g.setColour(juce::Colours::white);
+    g.drawRect(bounds, 1.0f);
+
+    // Calculate meter height based on value
+    float meterHeight = bounds.getHeight() * currentValue;
+    float peakHeight = bounds.getHeight() * peakValue;
+
+    // Draw meter segments with proper colors
+    auto meterBounds = bounds.reduced(2.0f);
+
+    // Green zone (0 to -20 dB)
+    g.setColour(juce::Colours::green);
+    float greenHeight = meterBounds.getHeight() * 0.63f; // -20 dB = 0.1 in linear
+    if (meterHeight > 0)
+    {
+        float greenMeterHeight = juce::jmin(meterHeight, greenHeight);
+        g.fillRect(meterBounds.removeFromBottom(greenMeterHeight));
+    }
+
+    // Yellow zone (-20 to -6 dB)
+    if (meterHeight > greenHeight)
+    {
+        g.setColour(juce::Colours::yellow);
+        float yellowHeight = meterBounds.getHeight() * 0.25f; // -6 dB = 0.5 in linear
+        float yellowMeterHeight = juce::jmin(meterHeight - greenHeight, yellowHeight);
+        if (yellowMeterHeight > 0)
+        {
+            g.fillRect(meterBounds.removeFromBottom(yellowMeterHeight));
+        }
+    }
+
+    // Red zone (-6 to 0 dB)
+    if (meterHeight > greenHeight + (bounds.getHeight() * 0.25f))
+    {
+        g.setColour(juce::Colours::red);
+        float redMeterHeight = meterHeight - greenHeight - (bounds.getHeight() * 0.25f);
+        if (redMeterHeight > 0)
+        {
+            g.fillRect(meterBounds.removeFromBottom(redMeterHeight));
+        }
+    }
+
+    // Draw peak indicator
+    if (peakValue > 0)
+    {
+        g.setColour(juce::Colours::white);
+        float peakY = bounds.getBottom() - (bounds.getHeight() * peakValue);
+        g.drawLine(bounds.getX(), peakY, bounds.getRight(), peakY, 2.0f);
+    }
+
+    // Draw label
+    g.setColour(juce::Colours::white);
+    g.setFont(12.0f);
+    g.drawText(meterName, bounds.removeFromTop(20), juce::Justification::centred);
+}
+
+void AudioMeter::resized()
+{
+    // No special resizing needed
+}
+
+MainComponent::MainComponent()
+{
+    // 1 input channel, 2 output channels (JUCE will adapt to device layout)
+    deviceManager.initialise (1, 2, nullptr, true);
+
+    // Create custom meters
+    inputMeter = std::make_unique<AudioMeter>("Input");
+    outputMeter = std::make_unique<AudioMeter>("Output");
+    gainReductionMeter = std::make_unique<AudioMeter>("Gain Red");
+
+    // Add all UI components
+    addAndMakeVisible(inputDeviceBox);
+    addAndMakeVisible(outputDeviceBox);
+    addAndMakeVisible(enableButton);
+
+    addAndMakeVisible(inputGainSlider);
+    addAndMakeVisible(outputGainSlider);
+
+    addAndMakeVisible(gateThresholdSlider);
+    addAndMakeVisible(gateRatioSlider);
+    addAndMakeVisible(gateAttackSlider);
+    addAndMakeVisible(gateReleaseSlider);
+
+    addAndMakeVisible(thresholdSlider);
+    addAndMakeVisible(ratioSlider);
+    addAndMakeVisible(attackSlider);
+    addAndMakeVisible(releaseSlider);
+    addAndMakeVisible(ceilingSlider);
+    addAndMakeVisible(lookaheadSlider);
+    addAndMakeVisible(kneeSlider);
+    addAndMakeVisible(makeupGainSlider);
+
+    addAndMakeVisible(inputGainLabel);
+    addAndMakeVisible(outputGainLabel);
+    addAndMakeVisible(gateThresholdLabel);
+    addAndMakeVisible(gateRatioLabel);
+    addAndMakeVisible(gateAttackLabel);
+    addAndMakeVisible(gateReleaseLabel);
+    addAndMakeVisible(thresholdLabel);
+    addAndMakeVisible(ratioLabel);
+    addAndMakeVisible(attackLabel);
+    addAndMakeVisible(releaseLabel);
+    addAndMakeVisible(ceilingLabel);
+    addAndMakeVisible(lookaheadLabel);
+    addAndMakeVisible(kneeLabel);
+    addAndMakeVisible(makeupGainLabel);
+
+    addAndMakeVisible(presetBox);
+    addAndMakeVisible(savePresetButton);
+    addAndMakeVisible(loadPresetButton);
+
+    addAndMakeVisible(inputMeter.get());
+    addAndMakeVisible(outputMeter.get());
+    addAndMakeVisible(gainReductionMeter.get());
+
+    // Setup sliders and labels
+    setupSliders();
+    setupLabels();
+    setupPresets();
+
+    // Setup callbacks
+    inputDeviceBox.onChange  = [this]{ setInputDevice (inputDeviceBox.getText());  };
+    outputDeviceBox.onChange = [this]{ setOutputDevice(outputDeviceBox.getText()); };
+    enableButton.onClick     = [this]{ toggleProcessing(); };
+
+    savePresetButton.onClick = [this]{ savePreset(presetBox.getText()); };
+    loadPresetButton.onClick = [this]{ loadPreset(presetBox.getText()); };
+    presetBox.onChange = [this]{ loadPreset(presetBox.getText()); };
+
+    refreshDeviceLists();
+    startTimerHz(30); // meter refresh
 }
 
 MainComponent::~MainComponent()
 {
-    shutdownAudio();
+    if (processingOn)
+        deviceManager.removeAudioCallback(&engine);
 }
 
-//==============================================================================
-void MainComponent::prepareToPlay (int samplesPerBlockExpected, double sampleRate)
+void MainComponent::paint(juce::Graphics& g)
 {
-    audioEngine->prepareToPlay(samplesPerBlockExpected, sampleRate);
-}
+    g.fillAll(juce::Colours::darkgrey);
 
-void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& bufferToFill)
-{
-    audioEngine->processAudioBlock(*bufferToFill.buffer, bufferToFill.startSample, bufferToFill.numSamples);
-    
-    // Update level meters
-    inputLevel = bufferToFill.buffer->getMagnitude(0, bufferToFill.numSamples);
-    outputLevel = bufferToFill.buffer->getMagnitude(0, bufferToFill.numSamples);
-    gainReduction = audioEngine->getCurrentGainReduction();
-}
-
-void MainComponent::releaseResources()
-{
-    audioEngine->releaseResources();
-}
-
-//==============================================================================
-void MainComponent::paint (juce::Graphics& g)
-{
-    g.fillAll (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId));
-    
-    // Draw level meters
-    g.setColour(juce::Colours::darkgrey);
-    g.fillRect(inputMeterBounds);
-    g.fillRect(outputMeterBounds);
-    g.fillRect(grMeterBounds);
-    
-    // Draw meter levels
-    g.setColour(juce::Colours::green);
-    auto inputHeight = static_cast<int>(inputLevel * inputMeterBounds.getHeight());
-    g.fillRect(inputMeterBounds.getX(), inputMeterBounds.getBottom() - inputHeight, 
-               inputMeterBounds.getWidth(), inputHeight);
-    
-    auto outputHeight = static_cast<int>(outputLevel * outputMeterBounds.getHeight());
-    g.fillRect(outputMeterBounds.getX(), outputMeterBounds.getBottom() - outputHeight,
-               outputMeterBounds.getWidth(), outputHeight);
-    
-    g.setColour(juce::Colours::red);
-    auto grHeight = static_cast<int>(gainReduction * grMeterBounds.getHeight());
-    g.fillRect(grMeterBounds.getX(), grMeterBounds.getY(),
-               grMeterBounds.getWidth(), grHeight);
-    
-    // Draw meter labels
+    // Draw section headers
     g.setColour(juce::Colours::white);
-    g.setFont(12.0f);
-    g.drawText("IN", inputMeterBounds.getX(), inputMeterBounds.getBottom() + 5, 
-               inputMeterBounds.getWidth(), 15, juce::Justification::centred);
-    g.drawText("OUT", outputMeterBounds.getX(), outputMeterBounds.getBottom() + 5,
-               outputMeterBounds.getWidth(), 15, juce::Justification::centred);
-    g.drawText("GR", grMeterBounds.getX(), grMeterBounds.getBottom() + 5,
-               grMeterBounds.getWidth(), 15, juce::Justification::centred);
+    g.setFont(16.0f);
+    g.drawText("Audio Processor", getLocalBounds().removeFromTop(40), juce::Justification::centred);
 }
 
 void MainComponent::resized()
 {
-    auto bounds = getLocalBounds();
-    auto margin = 10;
-    
-    // Top row - presets and enable button
-    auto topRow = bounds.removeFromTop(40);
-    presetLabel.setBounds(topRow.removeFromLeft(60));
-    presetCombo.setBounds(topRow.removeFromLeft(150));
-    topRow.removeFromLeft(margin);
-    presetButton.setBounds(topRow.removeFromLeft(100));
-    topRow.removeFromLeft(margin);
-    enableButton.setBounds(topRow.removeFromLeft(150));
-    
-    bounds.removeFromTop(margin);
-    
-    // Main content area
-    auto contentHeight = bounds.getHeight() / 3;
-    
-    // Input section
-    auto inputBounds = bounds.removeFromTop(contentHeight);
-    inputGroup.setBounds(inputBounds);
-    inputBounds.reduce(margin, margin + 20);
-    
-    auto inputLeft = inputBounds.removeFromLeft(inputBounds.getWidth() / 2);
-    inputDeviceLabel.setBounds(inputLeft.removeFromTop(20));
-    inputDeviceCombo.setBounds(inputLeft.removeFromTop(25));
-    inputLeft.removeFromTop(margin);
-    inputGainLabel.setBounds(inputLeft.removeFromTop(20));
-    inputGainSlider.setBounds(inputLeft.removeFromTop(25));
-    
-    // Input meter
-    inputMeterBounds = inputBounds.removeFromRight(30);
-    inputMeterBounds.removeFromTop(20);
-    inputMeterBounds.removeFromBottom(20);
-    
-    // Processing section
-    auto processingBounds = bounds.removeFromTop(contentHeight);
-    processingGroup.setBounds(processingBounds);
-    processingBounds.reduce(margin, margin + 20);
-    
-    auto compressorBounds = processingBounds.removeFromLeft(processingBounds.getWidth() / 2);
-    auto limiterBounds = processingBounds;
-    
+    auto bounds = getLocalBounds().reduced(10);
+
+    // Title area
+    auto titleArea = bounds.removeFromTop(40);
+
+    // Device controls area
+    auto deviceArea = bounds.removeFromTop(100);
+    inputDeviceBox.setBounds(deviceArea.removeFromLeft(deviceArea.getWidth() / 2 - 5).removeFromTop(25));
+    outputDeviceBox.setBounds(deviceArea.removeFromRight(deviceArea.getWidth() / 2 - 5).removeFromTop(25));
+    enableButton.setBounds(deviceArea.removeFromTop(30).reduced(0, 5));
+
+    // Meters area (right side)
+    auto metersArea = bounds.removeFromRight(80);
+    inputMeter->setBounds(metersArea.removeFromTop(120));
+    metersArea.removeFromTop(10);
+    outputMeter->setBounds(metersArea.removeFromTop(120));
+    metersArea.removeFromTop(10);
+    gainReductionMeter->setBounds(metersArea.removeFromTop(120));
+
+    // Preset area
+    auto presetArea = bounds.removeFromTop(60);
+    presetBox.setBounds(presetArea.removeFromLeft(presetArea.getWidth() / 2 - 5).removeFromTop(25));
+    auto buttonArea = presetArea.removeFromRight(presetArea.getWidth() / 2 - 5);
+    savePresetButton.setBounds(buttonArea.removeFromTop(25));
+    buttonArea.removeFromTop(5);
+    loadPresetButton.setBounds(buttonArea.removeFromTop(25));
+
+    // Controls area (left side) - organized in columns
+    auto controlsArea = bounds;
+
+    // Column 1: Input/Output gains
+    auto col1 = controlsArea.removeFromLeft(controlsArea.getWidth() / 4);
+    inputGainLabel.setBounds(col1.removeFromTop(20));
+    inputGainSlider.setBounds(col1.removeFromTop(80));
+    col1.removeFromTop(10);
+    outputGainLabel.setBounds(col1.removeFromTop(20));
+    outputGainSlider.setBounds(col1.removeFromTop(80));
+
+    // Column 2: Noise Gate
+    auto col2 = controlsArea.removeFromLeft(controlsArea.getWidth() / 3);
+    gateThresholdLabel.setBounds(col2.removeFromTop(20));
+    gateThresholdSlider.setBounds(col2.removeFromTop(80));
+    col2.removeFromTop(10);
+    gateRatioLabel.setBounds(col2.removeFromTop(20));
+    gateRatioSlider.setBounds(col2.removeFromTop(80));
+    col2.removeFromTop(10);
+    gateAttackLabel.setBounds(col2.removeFromTop(20));
+    gateAttackSlider.setBounds(col2.removeFromTop(80));
+    col2.removeFromTop(10);
+    gateReleaseLabel.setBounds(col2.removeFromTop(20));
+    gateReleaseSlider.setBounds(col2.removeFromTop(80));
+
+    // Column 3: Compressor
+    auto col3 = controlsArea.removeFromLeft(controlsArea.getWidth() / 2);
+    thresholdLabel.setBounds(col3.removeFromTop(20));
+    thresholdSlider.setBounds(col3.removeFromTop(80));
+    col3.removeFromTop(10);
+    ratioLabel.setBounds(col3.removeFromTop(20));
+    ratioSlider.setBounds(col3.removeFromTop(80));
+    col3.removeFromTop(10);
+    attackLabel.setBounds(col3.removeFromTop(20));
+    attackSlider.setBounds(col3.removeFromTop(80));
+    col3.removeFromTop(10);
+    releaseLabel.setBounds(col3.removeFromTop(20));
+    releaseSlider.setBounds(col3.removeFromTop(80));
+
+    // Column 4: Limiter and additional controls
+    auto col4 = controlsArea;
+    ceilingLabel.setBounds(col4.removeFromTop(20));
+    ceilingSlider.setBounds(col4.removeFromTop(80));
+    col4.removeFromTop(10);
+    lookaheadLabel.setBounds(col4.removeFromTop(20));
+    lookaheadSlider.setBounds(col4.removeFromTop(80));
+    col4.removeFromTop(10);
+    kneeLabel.setBounds(col4.removeFromTop(20));
+    kneeSlider.setBounds(col4.removeFromTop(80));
+    col4.removeFromTop(10);
+    makeupGainLabel.setBounds(col4.removeFromTop(20));
+    makeupGainSlider.setBounds(col4.removeFromTop(80));
+}
+
+void MainComponent::setupSliders()
+{
+    // All sliders are now vertical
+    auto setupVerticalSlider = [](juce::Slider& slider, double min, double max, double value,
+                                  const std::function<void()>& callback) {
+        slider.setRange(min, max, (max - min) / 1000.0);
+        slider.setValue(value);
+        slider.setSliderStyle(juce::Slider::LinearVertical);
+        slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 20);
+        slider.onValueChange = callback;
+    };
+
+    // Input/Output gains
+    setupVerticalSlider(inputGainSlider, 0.0, 10.0, 1.0, [this]{ updateEngineParameters(); });
+    setupVerticalSlider(outputGainSlider, 0.0, 10.0, 1.0, [this]{ updateEngineParameters(); });
+
+    // Noise Gate controls
+    setupVerticalSlider(gateThresholdSlider, -80.0, 0.0, -60.0, [this]{ updateEngineParameters(); });
+    setupVerticalSlider(gateRatioSlider, 1.0, 50.0, 10.0, [this]{ updateEngineParameters(); });
+    setupVerticalSlider(gateAttackSlider, 0.1, 100.0, 1.0, [this]{ updateEngineParameters(); });
+    setupVerticalSlider(gateReleaseSlider, 10.0, 1000.0, 100.0, [this]{ updateEngineParameters(); });
+
     // Compressor controls
-    compressorThresholdLabel.setBounds(compressorBounds.removeFromTop(20));
-    compressorThresholdSlider.setBounds(compressorBounds.removeFromTop(25));
-    compressorRatioLabel.setBounds(compressorBounds.removeFromTop(20));
-    compressorRatioSlider.setBounds(compressorBounds.removeFromTop(25));
-    compressorAttackLabel.setBounds(compressorBounds.removeFromTop(20));
-    compressorAttackSlider.setBounds(compressorBounds.removeFromTop(25));
-    compressorReleaseLabel.setBounds(compressorBounds.removeFromTop(20));
-    compressorReleaseSlider.setBounds(compressorBounds.removeFromTop(25));
-    
+    setupVerticalSlider(thresholdSlider, -60.0, 0.0, -18.0, [this]{ updateEngineParameters(); });
+    setupVerticalSlider(ratioSlider, 1.0, 20.0, 3.0, [this]{ updateEngineParameters(); });
+    setupVerticalSlider(attackSlider, 0.1, 100.0, 1.0, [this]{ updateEngineParameters(); });
+    setupVerticalSlider(releaseSlider, 10.0, 1000.0, 30.0, [this]{ updateEngineParameters(); });
+
     // Limiter controls
-    limiterBounds.removeFromLeft(margin);
-    limiterCeilingLabel.setBounds(limiterBounds.removeFromTop(20));
-    limiterCeilingSlider.setBounds(limiterBounds.removeFromTop(25));
-    limiterLookaheadLabel.setBounds(limiterBounds.removeFromTop(20));
-    limiterLookaheadSlider.setBounds(limiterBounds.removeFromTop(25));
+    setupVerticalSlider(ceilingSlider, -20.0, 0.0, -1.0, [this]{ updateEngineParameters(); });
+    setupVerticalSlider(lookaheadSlider, 0.0, 10.0, 3.0, [this]{ updateEngineParameters(); });
+
+    // Additional controls
+    setupVerticalSlider(kneeSlider, 0.0, 20.0, 2.0, [this]{ updateEngineParameters(); });
+    setupVerticalSlider(makeupGainSlider, -20.0, 20.0, 0.0, [this]{ updateEngineParameters(); });
+}
+
+void MainComponent::setupLabels()
+{
+    inputGainLabel.setText("Input Gain", juce::dontSendNotification);
+    inputGainLabel.setJustificationType(juce::Justification::centred);
+
+    outputGainLabel.setText("Output Gain", juce::dontSendNotification);
+    outputGainLabel.setJustificationType(juce::Justification::centred);
+
+    gateThresholdLabel.setText("Gate Thresh", juce::dontSendNotification);
+    gateThresholdLabel.setJustificationType(juce::Justification::centred);
+
+    gateRatioLabel.setText("Gate Ratio", juce::dontSendNotification);
+    gateRatioLabel.setJustificationType(juce::Justification::centred);
+
+    gateAttackLabel.setText("Gate Attack", juce::dontSendNotification);
+    gateAttackLabel.setJustificationType(juce::Justification::centred);
+
+    gateReleaseLabel.setText("Gate Release", juce::dontSendNotification);
+    gateReleaseLabel.setJustificationType(juce::Justification::centred);
+
+    thresholdLabel.setText("Threshold", juce::dontSendNotification);
+    thresholdLabel.setJustificationType(juce::Justification::centred);
+
+    ratioLabel.setText("Ratio", juce::dontSendNotification);
+    ratioLabel.setJustificationType(juce::Justification::centred);
+
+    attackLabel.setText("Attack", juce::dontSendNotification);
+    attackLabel.setJustificationType(juce::Justification::centred);
+
+    releaseLabel.setText("Release", juce::dontSendNotification);
+    releaseLabel.setJustificationType(juce::Justification::centred);
+
+    ceilingLabel.setText("Ceiling", juce::dontSendNotification);
+    ceilingLabel.setJustificationType(juce::Justification::centred);
+
+    lookaheadLabel.setText("Lookahead", juce::dontSendNotification);
+    lookaheadLabel.setJustificationType(juce::Justification::centred);
+
+    kneeLabel.setText("Knee", juce::dontSendNotification);
+    kneeLabel.setJustificationType(juce::Justification::centred);
+
+    makeupGainLabel.setText("Makeup", juce::dontSendNotification);
+    makeupGainLabel.setJustificationType(juce::Justification::centred);
+}
+
+void MainComponent::setupPresets()
+{
+    presetBox.addItem("Default", 1);
+    presetBox.addItem("Podcast", 2);
+    presetBox.addItem("Streaming", 3);
+    presetBox.addItem("VoiceOver", 4);
+    presetBox.addItem("SlammedUp", 5);
+    presetBox.setSelectedId(1, juce::dontSendNotification);
+}
+
+void MainComponent::updateEngineParameters()
+{
+    // Update AudioEngine parameters
+    engine.inputGain.store(inputGainSlider.getValue());
+    engine.outputGain.store(outputGainSlider.getValue());
+
+    // Update Noise Gate parameters
+    engine.gateThreshold.store(gateThresholdSlider.getValue());
+    engine.gateRatio.store(gateRatioSlider.getValue());
+    engine.gateAttack.store(gateAttackSlider.getValue());
+    engine.gateRelease.store(gateReleaseSlider.getValue());
+
+    // Update Compressor parameters
+    engine.threshDb.store(thresholdSlider.getValue());
+    engine.ratio.store(ratioSlider.getValue());
+    engine.ceilingDb.store(ceilingSlider.getValue());
+
+    // Update Compressor and Limiter parameters
+    compressor.setThreshold(thresholdSlider.getValue());
+    compressor.setRatio(ratioSlider.getValue());
+    compressor.setAttack(attackSlider.getValue());
+    compressor.setRelease(releaseSlider.getValue());
+    compressor.setKnee(kneeSlider.getValue());
+    compressor.setMakeupGain(makeupGainSlider.getValue());
+
+    limiter.setCeiling(ceilingSlider.getValue());
+    limiter.setLookahead(lookaheadSlider.getValue());
+    limiter.setRelease(releaseSlider.getValue());
+}
+
+void MainComponent::loadPreset(const juce::String& presetName)
+{
+    // First try to load from file, if that fails use hardcoded values
+    if (loadPresetFromFile(presetName))
+    {
+        updateEngineParameters();
+        return;
+    }
     
-    // Gain reduction meter
-    grMeterBounds = juce::Rectangle<int>(processingBounds.getRight() - 30, processingBounds.getY() + 20,
-                                         30, processingBounds.getHeight() - 40);
+    // Fallback to hardcoded presets
+    if (presetName == "Default")
+    {
+        inputGainSlider.setValue(1.0);
+        outputGainSlider.setValue(1.0);
+        gateThresholdSlider.setValue(-60.0);
+        gateRatioSlider.setValue(10.0);
+        gateAttackSlider.setValue(1.0);
+        gateReleaseSlider.setValue(100.0);
+        thresholdSlider.setValue(-18.0);
+        ratioSlider.setValue(3.0);
+        attackSlider.setValue(1.0);
+        releaseSlider.setValue(30.0);
+        ceilingSlider.setValue(-1.0);
+        lookaheadSlider.setValue(3.0);
+        kneeSlider.setValue(2.0);
+        makeupGainSlider.setValue(0.0);
+    }
+    else if (presetName == "Podcast")
+    {
+        inputGainSlider.setValue(1.2);
+        outputGainSlider.setValue(0.8);
+        gateThresholdSlider.setValue(-50.0);
+        gateRatioSlider.setValue(15.0);
+        gateAttackSlider.setValue(2.0);
+        gateReleaseSlider.setValue(150.0);
+        thresholdSlider.setValue(-24.0);
+        ratioSlider.setValue(4.0);
+        attackSlider.setValue(2.0);
+        releaseSlider.setValue(50.0);
+        ceilingSlider.setValue(-2.0);
+        lookaheadSlider.setValue(2.0);
+        kneeSlider.setValue(3.0);
+        makeupGainSlider.setValue(2.0);
+    }
+    else if (presetName == "Streaming")
+    {
+        inputGainSlider.setValue(1.5);
+        outputGainSlider.setValue(0.7);
+        gateThresholdSlider.setValue(-45.0);
+        gateRatioSlider.setValue(20.0);
+        gateAttackSlider.setValue(1.5);
+        gateReleaseSlider.setValue(120.0);
+        thresholdSlider.setValue(-20.0);
+        ratioSlider.setValue(6.0);
+        attackSlider.setValue(1.5);
+        releaseSlider.setValue(40.0);
+        ceilingSlider.setValue(-1.5);
+        lookaheadSlider.setValue(4.0);
+        kneeSlider.setValue(2.5);
+        makeupGainSlider.setValue(3.0);
+    }
+    else if (presetName == "VoiceOver")
+    {
+        inputGainSlider.setValue(1.8);
+        outputGainSlider.setValue(0.6);
+        gateThresholdSlider.setValue(-40.0);
+        gateRatioSlider.setValue(25.0);
+        gateAttackSlider.setValue(0.5);
+        gateReleaseSlider.setValue(80.0);
+        thresholdSlider.setValue(-16.0);
+        ratioSlider.setValue(8.0);
+        attackSlider.setValue(0.5);
+        releaseSlider.setValue(25.0);
+        ceilingSlider.setValue(-0.5);
+        lookaheadSlider.setValue(5.0);
+        kneeSlider.setValue(1.5);
+        makeupGainSlider.setValue(4.0);
+    }
+    else if (presetName == "SlammedUp")
+    {
+        inputGainSlider.setValue(10.0);  // Input Gain=10.0
+        outputGainSlider.setValue(1.0);  // Output Gain=0.0 but using 1.0 as base
+        gateThresholdSlider.setValue(-44.0);  // NoiseGate Threshold=-40.0
+        gateRatioSlider.setValue(21.0);  // NoiseGate Ratio=21.0
+        gateAttackSlider.setValue(0.1);  // NoiseGate Attack=0.1
+        gateReleaseSlider.setValue(400.0);  // NoiseGate Release=400.0
+        thresholdSlider.setValue(-18.0);  // Compressor Threshold=-18.0
+        ratioSlider.setValue(3.6);  // Compressor Ratio=3.0
+        attackSlider.setValue(0.2);  // Compressor Attack=0.5
+        releaseSlider.setValue(175.0);  // Compressor Release=20.0
+        ceilingSlider.setValue(-1.5);  // Limiter Ceiling=-1.66
+        lookaheadSlider.setValue(5.0);  // Limiter Lookahead=5.0
+        kneeSlider.setValue(1.5);  // Compressor Knee=1.5
+        makeupGainSlider.setValue(4.0);  // MakeupGain=4.0
+    }
+
+    updateEngineParameters();
+}
+
+void MainComponent::savePreset(const juce::String& presetName)
+{
+    if (presetName.isEmpty())
+    {
+        juce::Logger::writeToLog("Error: Cannot save preset with empty name");
+        return;
+    }
     
-    // Output section
-    auto outputBounds = bounds;
-    outputGroup.setBounds(outputBounds);
-    outputBounds.reduce(margin, margin + 20);
+    auto presetFile = getPresetFile(presetName);
     
-    auto outputLeft = outputBounds.removeFromLeft(outputBounds.getWidth() / 2);
-    outputDeviceLabel.setBounds(outputLeft.removeFromTop(20));
-    outputDeviceCombo.setBounds(outputLeft.removeFromTop(25));
-    outputLeft.removeFromTop(margin);
-    outputGainLabel.setBounds(outputLeft.removeFromTop(20));
-    outputGainSlider.setBounds(outputLeft.removeFromTop(25));
+    juce::String presetContent;
+    presetContent += "[Audio Processor Preset]\n";
+    presetContent += "Name=" + presetName + "\n";
+    presetContent += "Description=User created preset\n";
+    presetContent += "\n";
     
-    // Output meter
-    outputMeterBounds = outputBounds.removeFromRight(30);
-    outputMeterBounds.removeFromTop(20);
-    outputMeterBounds.removeFromBottom(20);
+    presetContent += "[Input]\n";
+    presetContent += "Gain=" + juce::String(inputGainSlider.getValue()) + "\n";
+    presetContent += "\n";
+    
+    presetContent += "[NoiseGate]\n";
+    presetContent += "Enabled=true\n";
+    presetContent += "Threshold=" + juce::String(gateThresholdSlider.getValue()) + "\n";
+    presetContent += "Ratio=" + juce::String(gateRatioSlider.getValue()) + "\n";
+    presetContent += "Attack=" + juce::String(gateAttackSlider.getValue()) + "\n";
+    presetContent += "Release=" + juce::String(gateReleaseSlider.getValue()) + "\n";
+    presetContent += "\n";
+    
+    presetContent += "[Compressor]\n";
+    presetContent += "Enabled=true\n";
+    presetContent += "Threshold=" + juce::String(thresholdSlider.getValue()) + "\n";
+    presetContent += "Ratio=" + juce::String(ratioSlider.getValue()) + "\n";
+    presetContent += "Attack=" + juce::String(attackSlider.getValue()) + "\n";
+    presetContent += "Release=" + juce::String(releaseSlider.getValue()) + "\n";
+    presetContent += "Knee=" + juce::String(kneeSlider.getValue()) + "\n";
+    presetContent += "\n";
+    
+    presetContent += "[Limiter]\n";
+    presetContent += "Enabled=true\n";
+    presetContent += "Ceiling=" + juce::String(ceilingSlider.getValue()) + "\n";
+    presetContent += "Lookahead=" + juce::String(lookaheadSlider.getValue()) + "\n";
+    presetContent += "Release=" + juce::String(releaseSlider.getValue()) + "\n";
+    presetContent += "\n";
+    
+    presetContent += "[Output]\n";
+    presetContent += "Gain=0.0\n";  // This seems to be always 0.0 in the preset files
+    presetContent += "MakeupGain=" + juce::String(makeupGainSlider.getValue()) + "\n";
+    presetContent += "\n";
+    
+    if (presetFile.replaceWithText(presetContent))
+    {
+        juce::Logger::writeToLog("Preset saved successfully: " + presetFile.getFullPathName());
+    }
+    else
+    {
+        juce::Logger::writeToLog("Error saving preset: " + presetFile.getFullPathName());
+    }
+}
+
+void MainComponent::refreshDeviceLists()
+{
+    inputDeviceBox.clear();
+    outputDeviceBox.clear();
+
+    // Enumerate all device types (e.g., WASAPI, ASIO if enabled) and split capture/render
+    auto& types = deviceManager.getAvailableDeviceTypes();
+
+    juce::StringArray inputs, outputs;
+    for (auto* type : types)
+    {
+        type->scanForDevices();
+        inputs .addArray(type->getDeviceNames(true));   // capture
+        outputs.addArray(type->getDeviceNames(false));  // render
+    }
+
+    inputs.removeEmptyStrings(true);
+    outputs.removeEmptyStrings(true);
+    inputs.removeDuplicates(true);
+    outputs.removeDuplicates(true);
+
+    inputDeviceBox .addItemList(inputs,  1);
+    outputDeviceBox.addItemList(outputs, 1);
+
+    if (inputs.size()  > 0) inputDeviceBox .setSelectedId(1, juce::dontSendNotification);
+    if (outputs.size() > 0) outputDeviceBox.setSelectedId(1, juce::dontSendNotification);
+}
+
+void MainComponent::setInputDevice(const juce::String& name)
+{
+    auto setup = deviceManager.getAudioDeviceSetup();
+    setup.inputDeviceName = name;
+    deviceManager.setAudioDeviceSetup(setup, true);
+}
+
+void MainComponent::setOutputDevice(const juce::String& name)
+{
+    auto setup = deviceManager.getAudioDeviceSetup();
+    setup.outputDeviceName = name;
+    deviceManager.setAudioDeviceSetup(setup, true);
+}
+
+void MainComponent::toggleProcessing()
+{
+    if (!processingOn)
+    {
+        deviceManager.addAudioCallback(&engine);
+        processingOn = true;
+        enableButton.setButtonText("Disable Processing");
+        juce::Logger::writeToLog("Engine ON");
+    }
+    else
+    {
+        deviceManager.removeAudioCallback(&engine);
+        processingOn = false;
+        enableButton.setButtonText("Enable Processing");
+        juce::Logger::writeToLog("Engine OFF");
+    }
 }
 
 void MainComponent::timerCallback()
 {
+    // Pull latest levels from the audio thread; bind these to your meter widgets.
+    lastIn  = engine.inPeak.load();
+    lastOut = engine.outPeak.load();
+    lastGR  = engine.grDb.load();
+
+    // Update meters with clamped values
+    float clampedIn  = juce::jlimit(0.0f, 1.0f, lastIn);
+    float clampedOut = juce::jlimit(0.0f, 1.0f, lastOut);
+
+    inputMeter->setValue(clampedIn);
+    outputMeter->setValue(clampedOut);
+    gainReductionMeter->setValue(lastGR / 20.0f); // Normalize to 0-1 range
+
     repaint();
 }
 
-//==============================================================================
-void MainComponent::setupSlider(juce::Slider& slider, juce::Label& label, const juce::String& labelText,
-                                 double min, double max, double defaultValue, const juce::String& suffix)
+bool MainComponent::loadPresetFromFile(const juce::String& presetName)
 {
-    addAndMakeVisible(slider);
-    addAndMakeVisible(label);
+    auto presetFile = getPresetFile(presetName);
     
-    slider.setRange(min, max);
-    slider.setValue(defaultValue);
-    slider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 20);
-    slider.setTextValueSuffix(suffix);
-    
-    label.setText(labelText, juce::dontSendNotification);
-    label.attachToComponent(&slider, false);
-}
-
-void MainComponent::setupComboBox(juce::ComboBox& combo, juce::Label& label, const juce::String& labelText)
-{
-    addAndMakeVisible(combo);
-    addAndMakeVisible(label);
-    
-    label.setText(labelText, juce::dontSendNotification);
-    label.attachToComponent(&combo, false);
-}
-
-void MainComponent::updateDeviceLists()
-{
-    auto& audioDeviceManager = deviceManager;
-    
-    inputDeviceCombo.clear();
-    outputDeviceCombo.clear();
-    
-    auto& inputDevices = audioDeviceManager.getAvailableDeviceTypes();
-    for (auto* deviceType : inputDevices)
+    if (!presetFile.exists())
     {
-        auto inputNames = deviceType->getDeviceNames(true);
-        for (auto& name : inputNames)
+        juce::Logger::writeToLog("Preset file not found: " + presetFile.getFullPathName());
+        return false;
+    }
+    
+    auto fileContent = presetFile.loadFileAsString();
+    auto lines = juce::StringArray::fromLines(fileContent);
+    
+    juce::String currentSection;
+    
+    for (auto line : lines)
+    {
+        line = line.trim();
+        
+        // Skip empty lines and comments
+        if (line.isEmpty() || line.startsWith("#") || line.startsWith(";"))
+            continue;
+            
+        // Check for section headers
+        if (line.startsWith("[") && line.endsWith("]"))
         {
-            inputDeviceCombo.addItem(name, inputDeviceCombo.getNumItems() + 1);
+            currentSection = line.substring(1, line.length() - 1);
+            continue;
         }
         
-        auto outputNames = deviceType->getDeviceNames(false);
-        for (auto& name : outputNames)
+        // Parse key=value pairs
+        auto equalsIndex = line.indexOfChar('=');
+        if (equalsIndex == -1)
+            continue;
+            
+        auto key = line.substring(0, equalsIndex).trim();
+        auto value = line.substring(equalsIndex + 1).trim();
+        
+        // Apply values based on section and key
+        if (currentSection == "Input")
         {
-            outputDeviceCombo.addItem(name, outputDeviceCombo.getNumItems() + 1);
+            if (key == "Gain")
+                inputGainSlider.setValue(value.getDoubleValue());
+        }
+        else if (currentSection == "NoiseGate")
+        {
+            if (key == "Threshold")
+                gateThresholdSlider.setValue(value.getDoubleValue());
+            else if (key == "Ratio")
+                gateRatioSlider.setValue(value.getDoubleValue());
+            else if (key == "Attack")
+                gateAttackSlider.setValue(value.getDoubleValue());
+            else if (key == "Release")
+                gateReleaseSlider.setValue(value.getDoubleValue());
+        }
+        else if (currentSection == "Compressor")
+        {
+            if (key == "Threshold")
+                thresholdSlider.setValue(value.getDoubleValue());
+            else if (key == "Ratio")
+                ratioSlider.setValue(value.getDoubleValue());
+            else if (key == "Attack")
+                attackSlider.setValue(value.getDoubleValue());
+            else if (key == "Release")
+                releaseSlider.setValue(value.getDoubleValue());
+            else if (key == "Knee")
+                kneeSlider.setValue(value.getDoubleValue());
+        }
+        else if (currentSection == "Limiter")
+        {
+            if (key == "Ceiling")
+                ceilingSlider.setValue(value.getDoubleValue());
+            else if (key == "Lookahead")
+                lookaheadSlider.setValue(value.getDoubleValue());
+            else if (key == "Release")
+                ; // Limiter release is handled by releaseSlider which is already set in Compressor section
+        }
+        else if (currentSection == "Output")
+        {
+            if (key == "Gain")
+                outputGainSlider.setValue(value.getDoubleValue() == 0.0 ? 1.0 : value.getDoubleValue());
+            else if (key == "MakeupGain")
+                makeupGainSlider.setValue(value.getDoubleValue());
         }
     }
+    
+    juce::Logger::writeToLog("Loaded preset from file: " + presetFile.getFullPathName());
+    return true;
 }
 
-void MainComponent::loadPreset(int presetIndex)
+juce::File MainComponent::getPresetFile(const juce::String& presetName)
 {
-    switch (presetIndex)
-    {
-        case 1: // Default
-            inputGainSlider.setValue(0.0);
-            compressorThresholdSlider.setValue(-20.0);
-            compressorRatioSlider.setValue(4.0);
-            compressorAttackSlider.setValue(1.0);
-            compressorReleaseSlider.setValue(30.0);
-            limiterCeilingSlider.setValue(-0.3);
-            limiterLookaheadSlider.setValue(3.0);
-            outputGainSlider.setValue(0.0);
-            break;
-            
-        case 2: // Podcast
-            inputGainSlider.setValue(6.0);
-            compressorThresholdSlider.setValue(-18.0);
-            compressorRatioSlider.setValue(3.0);
-            compressorAttackSlider.setValue(2.0);
-            compressorReleaseSlider.setValue(50.0);
-            limiterCeilingSlider.setValue(-1.0);
-            limiterLookaheadSlider.setValue(5.0);
-            outputGainSlider.setValue(2.0);
-            break;
-            
-        case 3: // Streaming
-            inputGainSlider.setValue(3.0);
-            compressorThresholdSlider.setValue(-15.0);
-            compressorRatioSlider.setValue(6.0);
-            compressorAttackSlider.setValue(0.5);
-            compressorReleaseSlider.setValue(20.0);
-            limiterCeilingSlider.setValue(-0.1);
-            limiterLookaheadSlider.setValue(2.0);
-            outputGainSlider.setValue(1.0);
-            break;
-            
-        case 4: // Voice Over
-            inputGainSlider.setValue(8.0);
-            compressorThresholdSlider.setValue(-25.0);
-            compressorRatioSlider.setValue(2.5);
-            compressorAttackSlider.setValue(3.0);
-            compressorReleaseSlider.setValue(100.0);
-            limiterCeilingSlider.setValue(-2.0);
-            limiterLookaheadSlider.setValue(8.0);
-            outputGainSlider.setValue(3.0);
-            break;
-    }
+    // Look for preset file in the current application directory
+    auto currentDir = juce::File::getCurrentWorkingDirectory();
+    return currentDir.getChildFile(presetName + ".preset");
 }
-
-void MainComponent::saveCurrentAsPreset()
-{
-    // This would typically open a dialog to save the current settings as a new preset
-    // For now, we'll just show an alert
-    juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
-                                           "Save Preset",
-                                           "Preset saving functionality would be implemented here.");
-}
-

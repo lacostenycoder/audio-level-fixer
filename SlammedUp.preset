@@ -1,0 +1,32 @@
+[Audio Processor Preset]
+Name=SlammedUp
+Description=Mega Boost for Weak Ass Mics
+
+[Input]
+Gain=10.0
+
+[NoiseGate]
+Enabled=true
+Threshold=-44.5
+Ratio=21.0
+Attack=0.1000
+Release=400.0
+
+[Compressor]
+Enabled=true
+Threshold=-18.00
+Ratio=3.641
+Attack=0.2
+Release=175.0
+Knee=5.0
+
+[Limiter]
+Enabled=true
+Ceiling=-1.5
+Lookahead=5.0
+Release=100.0
+
+[Output]
+Gain=4.70
+MakeupGain=4.00
+
