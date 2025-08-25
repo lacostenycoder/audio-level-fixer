@@ -4,6 +4,18 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 //==============================================================================
+// Window configuration constants
+namespace WindowConfig
+{
+    static constexpr int DEFAULT_WIDTH = 1000;
+    static constexpr int DEFAULT_HEIGHT = 700;
+    static constexpr int MIN_WIDTH = 900;
+    static constexpr int MIN_HEIGHT = 650;
+    static constexpr int MAX_WIDTH = 2000;
+    static constexpr int MAX_HEIGHT = 1500;
+}
+
+//==============================================================================
 class AudioProcessorApplication : public juce::JUCEApplication
 {
 public:
@@ -74,7 +86,7 @@ public:
             setFullScreen (true);
            #else
             setResizable (true, true);
-            centreWithSize (800, 600);
+            setupWindowBounds();
            #endif
 
             setVisible (true);
@@ -86,6 +98,42 @@ public:
             // ask the app to quit when this happens, but you can change this to do
             // whatever you need.
             JUCEApplication::getInstance()->systemRequestedQuit();
+        }
+
+    private:
+        void setupWindowBounds()
+        {
+            auto displays = juce::Desktop::getInstance().getDisplays();
+            auto mainDisplay = displays.getMainDisplay();
+            auto workArea = mainDisplay.userArea;
+            
+            // Calculate dynamic limits based on screen size
+            int maxWidth = juce::jmin(WindowConfig::MAX_WIDTH, workArea.getWidth() - 100);
+            int maxHeight = juce::jmin(WindowConfig::MAX_HEIGHT, workArea.getHeight() - 100);
+            
+            // Ensure minimum size fits on screen
+            int minWidth = juce::jmin(WindowConfig::MIN_WIDTH, workArea.getWidth() - 200);
+            int minHeight = juce::jmin(WindowConfig::MIN_HEIGHT, workArea.getHeight() - 200);
+            
+            // Ensure minimum size is not too small for usability
+            minWidth = juce::jmax(minWidth, 600);
+            minHeight = juce::jmax(minHeight, 400);
+            
+            // Set the resize limits with screen-aware bounds
+            setResizeLimits(minWidth, minHeight, maxWidth, maxHeight);
+            
+            // Use default size if it fits, otherwise scale down proportionally
+            int defaultWidth = WindowConfig::DEFAULT_WIDTH;
+            int defaultHeight = WindowConfig::DEFAULT_HEIGHT;
+            
+            if (defaultWidth > maxWidth || defaultHeight > maxHeight)
+            {
+                float scale = juce::jmin(float(maxWidth) / defaultWidth, float(maxHeight) / defaultHeight);
+                defaultWidth = int(defaultWidth * scale);
+                defaultHeight = int(defaultHeight * scale);
+            }
+            
+            centreWithSize(defaultWidth, defaultHeight);
         }
 
         /* Note: Be careful if you override any DocumentWindow methods - the base
