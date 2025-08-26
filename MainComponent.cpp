@@ -174,8 +174,87 @@ MainComponent::MainComponent()
     outputDeviceBox.onChange = [this]{ setOutputDevice(outputDeviceBox.getText()); };
     enableButton.onClick     = [this]{ toggleProcessing(); };
 
-    savePresetButton.onClick = [this]{ savePreset(presetBox.getText()); };
-    loadPresetButton.onClick = [this]{ loadPreset(presetBox.getText()); };
+    savePresetButton.onClick = [this]{ 
+        juce::String currentSelection = presetBox.getText();
+        juce::String presetName;
+        
+        // For now, use a simple approach to save presets
+        // If current preset exists, overwrite it directly (no confirmation for simplicity)
+        if (currentSelection.isNotEmpty())
+        {
+            auto presetFile = getPresetFile(currentSelection);
+            if (presetFile.exists())
+            {
+                savePreset(currentSelection);
+                juce::NativeMessageBox::showMessageBoxAsync(
+                    juce::AlertWindow::InfoIcon,
+                    "Preset Saved",
+                    "Preset updated successfully: " + currentSelection
+                );
+                return;
+            }
+        }
+        
+        // Save as new preset with incremental naming
+        juce::String baseName = currentSelection.isNotEmpty() ? currentSelection + "_copy" : "MyPreset";
+        presetName = baseName;
+        
+        // Ensure unique name by adding number if needed
+        auto presetFile = getPresetFile(presetName);
+        int counter = 1;
+        while (presetFile.exists())
+        {
+            presetName = baseName + juce::String(counter);
+            presetFile = getPresetFile(presetName);
+            counter++;
+        }
+        
+        // Save the preset
+        savePreset(presetName);
+        refreshPresetList();
+        
+        // Select the newly saved preset
+        for (int i = 0; i < presetBox.getNumItems(); ++i)
+        {
+            if (presetBox.getItemText(i) == presetName)
+            {
+                presetBox.setSelectedItemIndex(i, juce::dontSendNotification);
+                break;
+            }
+        }
+        
+        // Show success message
+        juce::NativeMessageBox::showMessageBoxAsync(
+            juce::AlertWindow::InfoIcon,
+            "Preset Saved",
+            "Preset saved successfully as: " + presetName
+        );
+    };
+    loadPresetButton.onClick = [this]{ 
+        // Refresh the preset list to show any new .preset files that might have been added
+        refreshPresetList();
+        
+        // Load the currently selected preset if one is selected
+        if (presetBox.getSelectedItemIndex() >= 0)
+        {
+            juce::String selectedPreset = presetBox.getText();
+            loadPreset(selectedPreset);
+            
+            juce::NativeMessageBox::showMessageBoxAsync(
+                juce::AlertWindow::InfoIcon,
+                "Preset Loaded",
+                "Reloaded preset: " + selectedPreset
+            );
+        }
+        else
+        {
+            juce::NativeMessageBox::showMessageBoxAsync(
+                juce::AlertWindow::InfoIcon,
+                "Preset List Refreshed",
+                "Preset list has been refreshed. Select a preset from the dropdown to load it."
+            );
+        }
+    };
     presetBox.onChange = [this]{ loadPreset(presetBox.getText()); };
 
     refreshDeviceLists();
@@ -365,12 +444,7 @@ void MainComponent::setupLabels()
 
 void MainComponent::setupPresets()
 {
-    presetBox.addItem("Default", 1);
-    presetBox.addItem("Podcast", 2);
-    presetBox.addItem("Streaming", 3);
-    presetBox.addItem("VoiceOver", 4);
-    presetBox.addItem("SlammedUp", 5);
-    presetBox.setSelectedId(1, juce::dontSendNotification);
+    refreshPresetList();
 }
 
 void MainComponent::updateEngineParameters()
@@ -547,7 +621,7 @@ void MainComponent::savePreset(const juce::String& presetName)
     presetContent += "\n";
     
     presetContent += "[Output]\n";
-    presetContent += "Gain=0.0\n";  // This seems to be always 0.0 in the preset files
+    presetContent += "Gain=" + juce::String(outputGainSlider.getValue()) + "\n";
     presetContent += "MakeupGain=" + juce::String(makeupGainSlider.getValue()) + "\n";
     presetContent += "\n";
     
@@ -642,7 +716,11 @@ void MainComponent::timerCallback()
 bool MainComponent::loadPresetFromFile(const juce::String& presetName)
 {
     auto presetFile = getPresetFile(presetName);
-    
+    return loadPresetFromFile(presetName, presetFile);
+}
+
+bool MainComponent::loadPresetFromFile(const juce::String& presetName, const juce::File& presetFile)
+{
     if (!presetFile.exists())
     {
         juce::Logger::writeToLog("Preset file not found: " + presetFile.getFullPathName());
@@ -719,7 +797,7 @@ bool MainComponent::loadPresetFromFile(const juce::String& presetName)
         else if (currentSection == "Output")
         {
             if (key == "Gain")
-                outputGainSlider.setValue(value.getDoubleValue() == 0.0 ? 1.0 : value.getDoubleValue());
+                outputGainSlider.setValue(value.getDoubleValue());
             else if (key == "MakeupGain")
                 makeupGainSlider.setValue(value.getDoubleValue());
         }
@@ -734,4 +812,51 @@ juce::File MainComponent::getPresetFile(const juce::String& presetName)
     // Look for preset file in the current application directory
     auto currentDir = juce::File::getCurrentWorkingDirectory();
     return currentDir.getChildFile(presetName + ".preset");
+}
+
+void MainComponent::refreshPresetList()
+{
+    juce::String currentSelection = presetBox.getText();
+    presetBox.clear();
+    
+    // Add default hardcoded presets
+    presetBox.addItem("Default", 1);
+    presetBox.addItem("Podcast", 2);
+    presetBox.addItem("Streaming", 3);
+    presetBox.addItem("VoiceOver", 4);
+    presetBox.addItem("SlammedUp", 5);
+    
+    // Scan for .preset files in the current directory
+    auto currentDir = juce::File::getCurrentWorkingDirectory();
+    auto presetFiles = currentDir.findChildFiles(juce::File::findFiles, false, "*.preset");
+    
+    int itemId = 6; // Start after hardcoded presets
+    for (const auto& file : presetFiles)
+    {
+        juce::String presetName = file.getFileNameWithoutExtension();
+        
+        // Skip if it's already a hardcoded preset
+        if (presetName == "Default" || presetName == "Podcast" || 
+            presetName == "Streaming" || presetName == "VoiceOver" || 
+            presetName == "SlammedUp")
+            continue;
+            
+        presetBox.addItem(presetName, itemId++);
+    }
+    
+    // Try to restore previous selection
+    if (currentSelection.isNotEmpty())
+    {
+        for (int i = 0; i < presetBox.getNumItems(); ++i)
+        {
+            if (presetBox.getItemText(i) == currentSelection)
+            {
+                presetBox.setSelectedItemIndex(i, juce::dontSendNotification);
+                return;
+            }
+        }
+    }
+    
+    // Default to first item if previous selection not found
+    presetBox.setSelectedId(1, juce::dontSendNotification);
 }
