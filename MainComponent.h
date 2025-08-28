@@ -103,6 +103,28 @@ private:
     bool isBuiltInPreset(const juce::String& presetName);
     juce::String cleanPresetName(const juce::String& name);
     void doSavePreset(const juce::String& presetName, const juce::File& presetFile);
+    
+    // Helper methods for lambda callbacks
+    void handleSavePresetClick();
+    void handleLoadPresetClick();
+    void handleDeletePresetClick();
+    
+    // Custom LookAndFeel for larger fonts
+    class CustomLookAndFeel : public juce::LookAndFeel_V4
+    {
+    public:
+        juce::Font getComboBoxFont(juce::ComboBox&) override
+        {
+            return juce::Font(16.0f);
+        }
+        
+        juce::Font getTextButtonFont(juce::TextButton&, int) override
+        {
+            return juce::Font(16.0f);
+        }
+    };
+    
+    CustomLookAndFeel customLookAndFeel;
 
     void timerCallback() override;
 
