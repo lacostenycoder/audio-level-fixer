@@ -159,6 +159,7 @@ MainComponent::MainComponent()
     addAndMakeVisible(presetBox);
     addAndMakeVisible(savePresetButton);
     addAndMakeVisible(loadPresetButton);
+    addAndMakeVisible(deletePresetButton);
 
     addAndMakeVisible(inputMeter.get());
     addAndMakeVisible(outputMeter.get());
@@ -175,83 +176,154 @@ MainComponent::MainComponent()
     enableButton.onClick     = [this]{ toggleProcessing(); };
 
     savePresetButton.onClick = [this]{ 
+        // Show input dialog for custom preset name
         juce::String currentSelection = presetBox.getText();
-        juce::String presetName;
+        juce::String defaultName = currentSelection.isNotEmpty() && !isBuiltInPreset(currentSelection) 
+            ? currentSelection : "MyPreset";
         
-        // For now, use a simple approach to save presets
-        // If current preset exists, overwrite it directly (no confirmation for simplicity)
-        if (currentSelection.isNotEmpty())
+        // Use async AlertWindow for text input
+        auto* alertWindow = new juce::AlertWindow("Save Preset", "Enter a name for your preset:", juce::AlertWindow::QuestionIcon);
+        alertWindow->addTextEditor("presetName", defaultName, "Preset name:");
+        alertWindow->addButton("Save", 1, juce::KeyPress(juce::KeyPress::returnKey));
+        alertWindow->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+        
+        alertWindow->enterModalState(true, juce::ModalCallbackFunction::create([this, alertWindow](int result)
         {
-            auto presetFile = getPresetFile(currentSelection);
-            if (presetFile.exists())
+            std::unique_ptr<juce::AlertWindow> windowDeleter(alertWindow);
+            
+            if (result == 0) // User cancelled
+                return;
+                
+            juce::String presetName = alertWindow->getTextEditorContents("presetName");
+            
+            // Check if user cancelled or entered empty name
+            if (presetName.isEmpty())
             {
-                savePreset(currentSelection);
+                return;
+            }
+            
+            // Clean the name (remove invalid characters)
+            presetName = cleanPresetName(presetName);
+            
+            if (presetName.isEmpty())
+            {
                 juce::NativeMessageBox::showMessageBoxAsync(
-                    juce::AlertWindow::InfoIcon,
-                    "Preset Saved",
-                    "Preset updated successfully: " + currentSelection
+                    juce::AlertWindow::WarningIcon,
+                    "Invalid Name",
+                    "Please enter a valid preset name."
                 );
                 return;
             }
-        }
-        
-        // Save as new preset with incremental naming
-        juce::String baseName = currentSelection.isNotEmpty() ? currentSelection + "_copy" : "MyPreset";
-        presetName = baseName;
-        
-        // Ensure unique name by adding number if needed
-        auto presetFile = getPresetFile(presetName);
-        int counter = 1;
-        while (presetFile.exists())
-        {
-            presetName = baseName + juce::String(counter);
-            presetFile = getPresetFile(presetName);
-            counter++;
-        }
-        
-        // Save the preset
-        savePreset(presetName);
-        refreshPresetList();
-        
-        // Select the newly saved preset
-        for (int i = 0; i < presetBox.getNumItems(); ++i)
-        {
-            if (presetBox.getItemText(i) == presetName)
+            
+            // Check if it's a built-in preset name
+            if (isBuiltInPreset(presetName))
             {
-                presetBox.setSelectedItemIndex(i, juce::dontSendNotification);
-                break;
+                juce::NativeMessageBox::showMessageBoxAsync(
+                    juce::AlertWindow::WarningIcon,
+                    "Cannot Use Name",
+                    "Cannot use built-in preset names. Please choose a different name."
+                );
+                return;
             }
-        }
-        
-        // Show success message
-        juce::NativeMessageBox::showMessageBoxAsync(
-            juce::AlertWindow::InfoIcon,
-            "Preset Saved",
-            "Preset saved successfully as: " + presetName
-        );
+            
+            auto presetFile = getPresetFile(presetName);
+            
+            // Check if file already exists and ask for confirmation
+            if (presetFile.exists())
+            {
+                auto* confirmWindow = new juce::AlertWindow("Preset Exists", 
+                    "A preset with this name already exists. Do you want to overwrite it?", 
+                    juce::AlertWindow::QuestionIcon);
+                confirmWindow->addButton("Yes", 1, juce::KeyPress(juce::KeyPress::returnKey));
+                confirmWindow->addButton("No", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+                
+                confirmWindow->enterModalState(true, juce::ModalCallbackFunction::create([this, confirmWindow, presetName, presetFile](int overwriteResult)
+                {
+                    std::unique_ptr<juce::AlertWindow> windowDeleter(confirmWindow);
+                    
+                    if (overwriteResult == 0) // User said No
+                        return;
+                        
+                    // Continue with save process
+                    this->doSavePreset(presetName, presetFile);
+                }));
+            }
+            else
+            {
+                // File doesn't exist, save directly
+                this->doSavePreset(presetName, presetFile);
+            }
+        }));
     };
     loadPresetButton.onClick = [this]{ 
         // Refresh the preset list to show any new .preset files that might have been added
         refreshPresetList();
         
-        // Load the currently selected preset if one is selected
-        if (presetBox.getSelectedItemIndex() >= 0)
+        juce::NativeMessageBox::showMessageBoxAsync(
+            juce::AlertWindow::InfoIcon,
+            "Preset List Refreshed",
+            "Preset list has been refreshed. Select a preset from the dropdown to load it."
+        );
+    };
+    deletePresetButton.onClick = [this]{
+        juce::String currentSelection = presetBox.getText();
+        
+        if (currentSelection.isEmpty())
         {
-            juce::String selectedPreset = presetBox.getText();
-            loadPreset(selectedPreset);
+            juce::NativeMessageBox::showMessageBoxAsync(
+                juce::AlertWindow::WarningIcon,
+                "No Preset Selected",
+                "Please select a preset to delete."
+            );
+            return;
+        }
+        
+        // Don't allow deleting built-in presets
+        if (isBuiltInPreset(currentSelection))
+        {
+            juce::NativeMessageBox::showMessageBoxAsync(
+                juce::AlertWindow::WarningIcon,
+                "Cannot Delete",
+                "Built-in presets cannot be deleted. Only custom presets can be removed."
+            );
+            return;
+        }
+        
+        auto presetFile = getPresetFile(currentSelection);
+        if (!presetFile.exists())
+        {
+            juce::NativeMessageBox::showMessageBoxAsync(
+                juce::AlertWindow::WarningIcon,
+                "Preset Not Found",
+                "The preset file does not exist: " + presetFile.getFullPathName()
+            );
+            return;
+        }
+        
+        // Delete the preset file
+        if (presetFile.deleteFile())
+        {
+            refreshPresetList();
+            
+            // Select first preset after deletion
+            if (presetBox.getNumItems() > 0)
+            {
+                presetBox.setSelectedItemIndex(0, juce::dontSendNotification);
+                loadPreset(presetBox.getText());
+            }
             
             juce::NativeMessageBox::showMessageBoxAsync(
                 juce::AlertWindow::InfoIcon,
-                "Preset Loaded",
-                "Reloaded preset: " + selectedPreset
+                "Preset Deleted",
+                "Preset deleted successfully: " + currentSelection
             );
         }
         else
         {
             juce::NativeMessageBox::showMessageBoxAsync(
-                juce::AlertWindow::InfoIcon,
-                "Preset List Refreshed",
-                "Preset list has been refreshed. Select a preset from the dropdown to load it."
+                juce::AlertWindow::WarningIcon,
+                "Delete Failed",
+                "Failed to delete preset file: " + presetFile.getFullPathName()
             );
         }
     };
@@ -298,13 +370,15 @@ void MainComponent::resized()
     metersArea.removeFromTop(10);
     gainReductionMeter->setBounds(metersArea.removeFromTop(120));
 
-    // Preset area
-    auto presetArea = bounds.removeFromTop(60);
+    // Preset area - make it taller for 3 buttons
+    auto presetArea = bounds.removeFromTop(85);
     presetBox.setBounds(presetArea.removeFromLeft(presetArea.getWidth() / 2 - 5).removeFromTop(25));
     auto buttonArea = presetArea.removeFromRight(presetArea.getWidth() / 2 - 5);
     savePresetButton.setBounds(buttonArea.removeFromTop(25));
     buttonArea.removeFromTop(5);
     loadPresetButton.setBounds(buttonArea.removeFromTop(25));
+    buttonArea.removeFromTop(5);
+    deletePresetButton.setBounds(buttonArea.removeFromTop(25));
 
     // Controls area (left side) - organized in columns
     auto controlsArea = bounds;
@@ -809,9 +883,14 @@ bool MainComponent::loadPresetFromFile(const juce::String& presetName, const juc
 
 juce::File MainComponent::getPresetFile(const juce::String& presetName)
 {
-    // Look for preset file in the current application directory
-    auto currentDir = juce::File::getCurrentWorkingDirectory();
-    return currentDir.getChildFile(presetName + ".preset");
+    // Get the appropriate directory for application data
+    auto appDataDir = getPresetDirectory();
+    
+    // Ensure directory exists
+    if (!appDataDir.exists())
+        appDataDir.createDirectory();
+    
+    return appDataDir.getChildFile(presetName + ".preset");
 }
 
 void MainComponent::refreshPresetList()
@@ -826,22 +905,23 @@ void MainComponent::refreshPresetList()
     presetBox.addItem("VoiceOver", 4);
     presetBox.addItem("SlammedUp", 5);
     
-    // Scan for .preset files in the current directory
-    auto currentDir = juce::File::getCurrentWorkingDirectory();
-    auto presetFiles = currentDir.findChildFiles(juce::File::findFiles, false, "*.preset");
-    
-    int itemId = 6; // Start after hardcoded presets
-    for (const auto& file : presetFiles)
+    // Scan for .preset files in the preset directory
+    auto presetDir = getPresetDirectory();
+    if (presetDir.exists())
     {
-        juce::String presetName = file.getFileNameWithoutExtension();
+        auto presetFiles = presetDir.findChildFiles(juce::File::findFiles, false, "*.preset");
         
-        // Skip if it's already a hardcoded preset
-        if (presetName == "Default" || presetName == "Podcast" || 
-            presetName == "Streaming" || presetName == "VoiceOver" || 
-            presetName == "SlammedUp")
-            continue;
+        int itemId = 6; // Start after hardcoded presets
+        for (const auto& file : presetFiles)
+        {
+            juce::String presetName = file.getFileNameWithoutExtension();
             
-        presetBox.addItem(presetName, itemId++);
+            // Skip if it's already a hardcoded preset
+            if (isBuiltInPreset(presetName))
+                continue;
+                
+            presetBox.addItem(presetName, itemId++);
+        }
     }
     
     // Try to restore previous selection
@@ -859,4 +939,71 @@ void MainComponent::refreshPresetList()
     
     // Default to first item if previous selection not found
     presetBox.setSelectedId(1, juce::dontSendNotification);
+}
+
+juce::File MainComponent::getPresetDirectory()
+{
+    // Get platform-appropriate application data directory
+    auto appDataDir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory);
+    return appDataDir.getChildFile("AudioBooster").getChildFile("Presets");
+}
+
+bool MainComponent::isBuiltInPreset(const juce::String& presetName)
+{
+    return (presetName == "Default" || presetName == "Podcast" || 
+            presetName == "Streaming" || presetName == "VoiceOver" || 
+            presetName == "SlammedUp");
+}
+
+juce::String MainComponent::cleanPresetName(const juce::String& name)
+{
+    // Remove invalid characters for file names
+    juce::String cleaned = name;
+    
+    // Remove or replace invalid characters
+    cleaned = cleaned.replaceCharacters("\\/:*?\"<>|", "");
+    
+    // Trim whitespace
+    cleaned = cleaned.trim();
+    
+    // Ensure it's not empty after cleaning
+    if (cleaned.isEmpty())
+        return juce::String();
+        
+    return cleaned;
+}
+
+void MainComponent::doSavePreset(const juce::String& presetName, const juce::File& presetFile)
+{
+    // Save the preset
+    savePreset(presetName);
+    
+    if (presetFile.exists())
+    {
+        refreshPresetList();
+        
+        // Select the newly saved preset
+        for (int i = 0; i < presetBox.getNumItems(); ++i)
+        {
+            if (presetBox.getItemText(i) == presetName)
+            {
+                presetBox.setSelectedItemIndex(i, juce::dontSendNotification);
+                break;
+            }
+        }
+        
+        juce::NativeMessageBox::showMessageBoxAsync(
+            juce::AlertWindow::InfoIcon,
+            "Preset Saved",
+            "Preset saved successfully: " + presetName
+        );
+    }
+    else
+    {
+        juce::NativeMessageBox::showMessageBoxAsync(
+            juce::AlertWindow::WarningIcon,
+            "Save Failed",
+            "Failed to save preset file: " + presetName
+        );
+    }
 }

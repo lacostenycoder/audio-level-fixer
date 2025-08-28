@@ -66,6 +66,7 @@ private:
     juce::ComboBox presetBox;
     juce::TextButton savePresetButton { "Save Preset" };
     juce::TextButton loadPresetButton { "Load Preset" };
+    juce::TextButton deletePresetButton { "Delete Preset" };
 
     // Custom meters
     std::unique_ptr<AudioMeter> inputMeter;
@@ -98,6 +99,10 @@ private:
     bool loadPresetFromFile(const juce::String& presetName);
     bool loadPresetFromFile(const juce::String& presetName, const juce::File& presetFile);
     juce::File getPresetFile(const juce::String& presetName);
+    juce::File getPresetDirectory();
+    bool isBuiltInPreset(const juce::String& presetName);
+    juce::String cleanPresetName(const juce::String& name);
+    void doSavePreset(const juce::String& presetName, const juce::File& presetFile);
 
     void timerCallback() override;
 
