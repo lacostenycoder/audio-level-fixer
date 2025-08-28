@@ -66,6 +66,7 @@ private:
     juce::ComboBox presetBox;
     juce::TextButton savePresetButton { "Save Preset" };
     juce::TextButton loadPresetButton { "Load Preset" };
+    juce::TextButton deletePresetButton { "Delete Preset" };
 
     // Custom meters
     std::unique_ptr<AudioMeter> inputMeter;
@@ -92,10 +93,38 @@ private:
     void updateEngineParameters();
     void loadPreset(const juce::String& presetName);
     void savePreset(const juce::String& presetName);
+    void refreshPresetList();
     
     // Helper methods for file-based preset management
     bool loadPresetFromFile(const juce::String& presetName);
+    bool loadPresetFromFile(const juce::String& presetName, const juce::File& presetFile);
     juce::File getPresetFile(const juce::String& presetName);
+    juce::File getPresetDirectory();
+    bool isBuiltInPreset(const juce::String& presetName);
+    juce::String cleanPresetName(const juce::String& name);
+    void doSavePreset(const juce::String& presetName, const juce::File& presetFile);
+    
+    // Helper methods for lambda callbacks
+    void handleSavePresetClick();
+    void handleLoadPresetClick();
+    void handleDeletePresetClick();
+    
+    // Custom LookAndFeel for larger fonts
+    class CustomLookAndFeel : public juce::LookAndFeel_V4
+    {
+    public:
+        juce::Font getComboBoxFont(juce::ComboBox&) override
+        {
+            return juce::Font(16.0f);
+        }
+        
+        juce::Font getTextButtonFont(juce::TextButton&, int) override
+        {
+            return juce::Font(16.0f);
+        }
+    };
+    
+    CustomLookAndFeel customLookAndFeel;
 
     void timerCallback() override;
 

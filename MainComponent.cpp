@@ -159,6 +159,7 @@ MainComponent::MainComponent()
     addAndMakeVisible(presetBox);
     addAndMakeVisible(savePresetButton);
     addAndMakeVisible(loadPresetButton);
+    addAndMakeVisible(deletePresetButton);
 
     addAndMakeVisible(inputMeter.get());
     addAndMakeVisible(outputMeter.get());
@@ -169,13 +170,23 @@ MainComponent::MainComponent()
     setupLabels();
     setupPresets();
 
+    // Apply custom look and feel for larger fonts to all UI components
+    inputDeviceBox.setLookAndFeel(&customLookAndFeel);
+    outputDeviceBox.setLookAndFeel(&customLookAndFeel);
+    presetBox.setLookAndFeel(&customLookAndFeel);
+    enableButton.setLookAndFeel(&customLookAndFeel);
+    savePresetButton.setLookAndFeel(&customLookAndFeel);
+    loadPresetButton.setLookAndFeel(&customLookAndFeel);
+    deletePresetButton.setLookAndFeel(&customLookAndFeel);
+
     // Setup callbacks
     inputDeviceBox.onChange  = [this]{ setInputDevice (inputDeviceBox.getText());  };
     outputDeviceBox.onChange = [this]{ setOutputDevice(outputDeviceBox.getText()); };
     enableButton.onClick     = [this]{ toggleProcessing(); };
 
-    savePresetButton.onClick = [this]{ savePreset(presetBox.getText()); };
-    loadPresetButton.onClick = [this]{ loadPreset(presetBox.getText()); };
+    savePresetButton.onClick = [this]{ handleSavePresetClick(); };
+    loadPresetButton.onClick = [this]{ handleLoadPresetClick(); };
+    deletePresetButton.onClick = [this]{ handleDeletePresetClick(); };
     presetBox.onChange = [this]{ loadPreset(presetBox.getText()); };
 
     refreshDeviceLists();
@@ -186,6 +197,15 @@ MainComponent::~MainComponent()
 {
     if (processingOn)
         deviceManager.removeAudioCallback(&engine);
+    
+    // Reset look and feel to prevent dangling pointers
+    inputDeviceBox.setLookAndFeel(nullptr);
+    outputDeviceBox.setLookAndFeel(nullptr);
+    presetBox.setLookAndFeel(nullptr);
+    enableButton.setLookAndFeel(nullptr);
+    savePresetButton.setLookAndFeel(nullptr);
+    loadPresetButton.setLookAndFeel(nullptr);
+    deletePresetButton.setLookAndFeel(nullptr);
 }
 
 void MainComponent::paint(juce::Graphics& g)
@@ -202,83 +222,106 @@ void MainComponent::resized()
 {
     auto bounds = getLocalBounds().reduced(10);
 
+    // Calculate optimal heights based on DPI scaling with larger minimums
+    const int comboBoxHeight = juce::jmax(30, static_cast<int>(30 * getDesktopScaleFactor()));
+    const int buttonHeight = juce::jmax(35, static_cast<int>(35 * getDesktopScaleFactor()));
+    const int sliderHeight = juce::jmax(80, static_cast<int>(80 * getDesktopScaleFactor()));
+    const int labelHeight = juce::jmax(20, static_cast<int>(20 * getDesktopScaleFactor()));
+    
     // Title area
     auto titleArea = bounds.removeFromTop(40);
 
-    // Device controls area
-    auto deviceArea = bounds.removeFromTop(100);
-    inputDeviceBox.setBounds(deviceArea.removeFromLeft(deviceArea.getWidth() / 2 - 5).removeFromTop(25));
-    outputDeviceBox.setBounds(deviceArea.removeFromRight(deviceArea.getWidth() / 2 - 5).removeFromTop(25));
-    enableButton.setBounds(deviceArea.removeFromTop(30).reduced(0, 5));
+    // Device controls area - dynamic height with more padding
+    const int deviceAreaHeight = comboBoxHeight + buttonHeight + 30; // more padding
+    auto deviceArea = bounds.removeFromTop(deviceAreaHeight);
+    inputDeviceBox.setBounds(deviceArea.removeFromLeft(deviceArea.getWidth() / 2 - 5).removeFromTop(comboBoxHeight));
+    outputDeviceBox.setBounds(deviceArea.removeFromRight(deviceArea.getWidth() / 2 - 5).removeFromTop(comboBoxHeight));
+    deviceArea.removeFromTop(10); // add space before button
+    enableButton.setBounds(deviceArea.removeFromTop(buttonHeight));
 
     // Meters area (right side)
     auto metersArea = bounds.removeFromRight(80);
-    inputMeter->setBounds(metersArea.removeFromTop(120));
+    const int meterHeight = juce::jmax(120, static_cast<int>(120 * getDesktopScaleFactor()));
+    inputMeter->setBounds(metersArea.removeFromTop(meterHeight));
     metersArea.removeFromTop(10);
-    outputMeter->setBounds(metersArea.removeFromTop(120));
+    outputMeter->setBounds(metersArea.removeFromTop(meterHeight));
     metersArea.removeFromTop(10);
-    gainReductionMeter->setBounds(metersArea.removeFromTop(120));
+    gainReductionMeter->setBounds(metersArea.removeFromTop(meterHeight));
 
-    // Preset area
-    auto presetArea = bounds.removeFromTop(60);
-    presetBox.setBounds(presetArea.removeFromLeft(presetArea.getWidth() / 2 - 5).removeFromTop(25));
+    // Preset area - dynamic height for 3 buttons
+    const int presetAreaHeight = comboBoxHeight + (buttonHeight * 3) + 15; // padding between buttons
+    auto presetArea = bounds.removeFromTop(presetAreaHeight);
+    presetBox.setBounds(presetArea.removeFromLeft(presetArea.getWidth() / 2 - 5).removeFromTop(comboBoxHeight));
     auto buttonArea = presetArea.removeFromRight(presetArea.getWidth() / 2 - 5);
-    savePresetButton.setBounds(buttonArea.removeFromTop(25));
+    savePresetButton.setBounds(buttonArea.removeFromTop(buttonHeight));
     buttonArea.removeFromTop(5);
-    loadPresetButton.setBounds(buttonArea.removeFromTop(25));
+    loadPresetButton.setBounds(buttonArea.removeFromTop(buttonHeight));
+    buttonArea.removeFromTop(5);
+    deletePresetButton.setBounds(buttonArea.removeFromTop(buttonHeight));
 
-    // Controls area (left side) - organized in columns
+    // Controls area (left side) - organized in columns with better spacing
     auto controlsArea = bounds;
+    
+    // Calculate available height and adjust slider height if needed
+    int availableHeight = controlsArea.getHeight();
+    int neededHeight = 4 * (labelHeight + sliderHeight) + 30; // 30px for spacing
+    
+    // Adjust slider height if we don't have enough space
+    int adjustedSliderHeight = sliderHeight;
+    if (neededHeight > availableHeight)
+    {
+        adjustedSliderHeight = juce::jmax(60, (availableHeight - 4 * labelHeight - 30) / 4);
+    }
 
     // Column 1: Input/Output gains
     auto col1 = controlsArea.removeFromLeft(controlsArea.getWidth() / 4);
-    inputGainLabel.setBounds(col1.removeFromTop(20));
-    inputGainSlider.setBounds(col1.removeFromTop(80));
+    inputGainLabel.setBounds(col1.removeFromTop(labelHeight));
+    inputGainSlider.setBounds(col1.removeFromTop(adjustedSliderHeight));
     col1.removeFromTop(10);
-    outputGainLabel.setBounds(col1.removeFromTop(20));
-    outputGainSlider.setBounds(col1.removeFromTop(80));
+    outputGainLabel.setBounds(col1.removeFromTop(labelHeight));
+    outputGainSlider.setBounds(col1.removeFromTop(adjustedSliderHeight));
 
     // Column 2: Noise Gate
     auto col2 = controlsArea.removeFromLeft(controlsArea.getWidth() / 3);
-    gateThresholdLabel.setBounds(col2.removeFromTop(20));
-    gateThresholdSlider.setBounds(col2.removeFromTop(80));
+    gateThresholdLabel.setBounds(col2.removeFromTop(labelHeight));
+    gateThresholdSlider.setBounds(col2.removeFromTop(adjustedSliderHeight));
     col2.removeFromTop(10);
-    gateRatioLabel.setBounds(col2.removeFromTop(20));
-    gateRatioSlider.setBounds(col2.removeFromTop(80));
+    gateRatioLabel.setBounds(col2.removeFromTop(labelHeight));
+    gateRatioSlider.setBounds(col2.removeFromTop(adjustedSliderHeight));
     col2.removeFromTop(10);
-    gateAttackLabel.setBounds(col2.removeFromTop(20));
-    gateAttackSlider.setBounds(col2.removeFromTop(80));
+    gateAttackLabel.setBounds(col2.removeFromTop(labelHeight));
+    gateAttackSlider.setBounds(col2.removeFromTop(adjustedSliderHeight));
     col2.removeFromTop(10);
-    gateReleaseLabel.setBounds(col2.removeFromTop(20));
-    gateReleaseSlider.setBounds(col2.removeFromTop(80));
+    gateReleaseLabel.setBounds(col2.removeFromTop(labelHeight));
+    gateReleaseSlider.setBounds(col2.removeFromTop(adjustedSliderHeight));
 
     // Column 3: Compressor
     auto col3 = controlsArea.removeFromLeft(controlsArea.getWidth() / 2);
-    thresholdLabel.setBounds(col3.removeFromTop(20));
-    thresholdSlider.setBounds(col3.removeFromTop(80));
+    thresholdLabel.setBounds(col3.removeFromTop(labelHeight));
+    thresholdSlider.setBounds(col3.removeFromTop(adjustedSliderHeight));
     col3.removeFromTop(10);
-    ratioLabel.setBounds(col3.removeFromTop(20));
-    ratioSlider.setBounds(col3.removeFromTop(80));
+    ratioLabel.setBounds(col3.removeFromTop(labelHeight));
+    ratioSlider.setBounds(col3.removeFromTop(adjustedSliderHeight));
     col3.removeFromTop(10);
-    attackLabel.setBounds(col3.removeFromTop(20));
-    attackSlider.setBounds(col3.removeFromTop(80));
+    attackLabel.setBounds(col3.removeFromTop(labelHeight));
+    attackSlider.setBounds(col3.removeFromTop(adjustedSliderHeight));
     col3.removeFromTop(10);
-    releaseLabel.setBounds(col3.removeFromTop(20));
-    releaseSlider.setBounds(col3.removeFromTop(80));
+    releaseLabel.setBounds(col3.removeFromTop(labelHeight));
+    releaseSlider.setBounds(col3.removeFromTop(adjustedSliderHeight));
 
-    // Column 4: Limiter and additional controls
+    // Column 4: Limiter and additional controls - ensure all controls fit
     auto col4 = controlsArea;
-    ceilingLabel.setBounds(col4.removeFromTop(20));
-    ceilingSlider.setBounds(col4.removeFromTop(80));
+    ceilingLabel.setBounds(col4.removeFromTop(labelHeight));
+    ceilingSlider.setBounds(col4.removeFromTop(adjustedSliderHeight));
     col4.removeFromTop(10);
-    lookaheadLabel.setBounds(col4.removeFromTop(20));
-    lookaheadSlider.setBounds(col4.removeFromTop(80));
+    lookaheadLabel.setBounds(col4.removeFromTop(labelHeight));
+    lookaheadSlider.setBounds(col4.removeFromTop(adjustedSliderHeight));
     col4.removeFromTop(10);
-    kneeLabel.setBounds(col4.removeFromTop(20));
-    kneeSlider.setBounds(col4.removeFromTop(80));
+    kneeLabel.setBounds(col4.removeFromTop(labelHeight));
+    kneeSlider.setBounds(col4.removeFromTop(adjustedSliderHeight));
     col4.removeFromTop(10);
-    makeupGainLabel.setBounds(col4.removeFromTop(20));
-    makeupGainSlider.setBounds(col4.removeFromTop(80));
+    makeupGainLabel.setBounds(col4.removeFromTop(labelHeight));
+    makeupGainSlider.setBounds(col4.removeFromTop(adjustedSliderHeight));
 }
 
 void MainComponent::setupSliders()
@@ -365,12 +408,7 @@ void MainComponent::setupLabels()
 
 void MainComponent::setupPresets()
 {
-    presetBox.addItem("Default", 1);
-    presetBox.addItem("Podcast", 2);
-    presetBox.addItem("Streaming", 3);
-    presetBox.addItem("VoiceOver", 4);
-    presetBox.addItem("SlammedUp", 5);
-    presetBox.setSelectedId(1, juce::dontSendNotification);
+    refreshPresetList();
 }
 
 void MainComponent::updateEngineParameters()
@@ -519,37 +557,48 @@ void MainComponent::savePreset(const juce::String& presetName)
     presetContent += "\n";
     
     presetContent += "[Input]\n";
-    presetContent += "Gain=" + juce::String(inputGainSlider.getValue()) + "\n";
+    presetContent += "Gain=" + juce::String(inputGainSlider.getValue(), 2) + "\n";
     presetContent += "\n";
     
     presetContent += "[NoiseGate]\n";
     presetContent += "Enabled=true\n";
-    presetContent += "Threshold=" + juce::String(gateThresholdSlider.getValue()) + "\n";
-    presetContent += "Ratio=" + juce::String(gateRatioSlider.getValue()) + "\n";
-    presetContent += "Attack=" + juce::String(gateAttackSlider.getValue()) + "\n";
-    presetContent += "Release=" + juce::String(gateReleaseSlider.getValue()) + "\n";
+    presetContent += "Threshold=" + juce::String(gateThresholdSlider.getValue(), 2) + "\n";
+    presetContent += "Ratio=" + juce::String(gateRatioSlider.getValue(), 2) + "\n";
+    presetContent += "Attack=" + juce::String(gateAttackSlider.getValue(), 2) + "\n";
+    presetContent += "Release=" + juce::String(gateReleaseSlider.getValue(), 2) + "\n";
     presetContent += "\n";
     
     presetContent += "[Compressor]\n";
     presetContent += "Enabled=true\n";
-    presetContent += "Threshold=" + juce::String(thresholdSlider.getValue()) + "\n";
-    presetContent += "Ratio=" + juce::String(ratioSlider.getValue()) + "\n";
-    presetContent += "Attack=" + juce::String(attackSlider.getValue()) + "\n";
-    presetContent += "Release=" + juce::String(releaseSlider.getValue()) + "\n";
-    presetContent += "Knee=" + juce::String(kneeSlider.getValue()) + "\n";
+    presetContent += "Threshold=" + juce::String(thresholdSlider.getValue(), 2) + "\n";
+    presetContent += "Ratio=" + juce::String(ratioSlider.getValue(), 2) + "\n";
+    presetContent += "Attack=" + juce::String(attackSlider.getValue(), 2) + "\n";
+    presetContent += "Release=" + juce::String(releaseSlider.getValue(), 2) + "\n";
+    presetContent += "Knee=" + juce::String(kneeSlider.getValue(), 2) + "\n";
     presetContent += "\n";
     
     presetContent += "[Limiter]\n";
     presetContent += "Enabled=true\n";
-    presetContent += "Ceiling=" + juce::String(ceilingSlider.getValue()) + "\n";
-    presetContent += "Lookahead=" + juce::String(lookaheadSlider.getValue()) + "\n";
-    presetContent += "Release=" + juce::String(releaseSlider.getValue()) + "\n";
+    presetContent += "Ceiling=" + juce::String(ceilingSlider.getValue(), 2) + "\n";
+    presetContent += "Lookahead=" + juce::String(lookaheadSlider.getValue(), 2) + "\n";
+    presetContent += "Release=" + juce::String(releaseSlider.getValue(), 2) + "\n";
     presetContent += "\n";
     
     presetContent += "[Output]\n";
-    presetContent += "Gain=0.0\n";  // This seems to be always 0.0 in the preset files
-    presetContent += "MakeupGain=" + juce::String(makeupGainSlider.getValue()) + "\n";
+    presetContent += "Gain=" + juce::String(outputGainSlider.getValue(), 2) + "\n";
+    presetContent += "MakeupGain=" + juce::String(makeupGainSlider.getValue(), 2) + "\n";
     presetContent += "\n";
+    
+    // Ensure parent directory exists before saving
+    auto parentDir = presetFile.getParentDirectory();
+    if (!parentDir.exists())
+    {
+        if (!parentDir.createDirectory())
+        {
+            juce::Logger::writeToLog("Error: Failed to create preset directory before saving: " + parentDir.getFullPathName());
+            return;
+        }
+    }
     
     if (presetFile.replaceWithText(presetContent))
     {
@@ -558,6 +607,11 @@ void MainComponent::savePreset(const juce::String& presetName)
     else
     {
         juce::Logger::writeToLog("Error saving preset: " + presetFile.getFullPathName());
+        // Log more specific error information
+        if (!presetFile.hasWriteAccess())
+            juce::Logger::writeToLog("Error: No write access to preset file location");
+        if (presetFile.isDirectory())
+            juce::Logger::writeToLog("Error: Preset file path is a directory, not a file");
     }
 }
 
@@ -642,14 +696,29 @@ void MainComponent::timerCallback()
 bool MainComponent::loadPresetFromFile(const juce::String& presetName)
 {
     auto presetFile = getPresetFile(presetName);
-    
+    return loadPresetFromFile(presetName, presetFile);
+}
+
+bool MainComponent::loadPresetFromFile(const juce::String& presetName, const juce::File& presetFile)
+{
     if (!presetFile.exists())
     {
         juce::Logger::writeToLog("Preset file not found: " + presetFile.getFullPathName());
         return false;
     }
     
+    if (!presetFile.existsAsFile())
+    {
+        juce::Logger::writeToLog("Preset path is not a file: " + presetFile.getFullPathName());
+        return false;
+    }
+    
     auto fileContent = presetFile.loadFileAsString();
+    if (fileContent.isEmpty())
+    {
+        juce::Logger::writeToLog("Preset file is empty or could not be read: " + presetFile.getFullPathName());
+        return false;
+    }
     auto lines = juce::StringArray::fromLines(fileContent);
     
     juce::String currentSection;
@@ -677,51 +746,93 @@ bool MainComponent::loadPresetFromFile(const juce::String& presetName)
         auto key = line.substring(0, equalsIndex).trim();
         auto value = line.substring(equalsIndex + 1).trim();
         
-        // Apply values based on section and key
+        // Apply values based on section and key with validation and clamping
         if (currentSection == "Input")
         {
             if (key == "Gain")
-                inputGainSlider.setValue(value.getDoubleValue());
+            {
+                double val = juce::jlimit(inputGainSlider.getMinimum(), inputGainSlider.getMaximum(), value.getDoubleValue());
+                inputGainSlider.setValue(val);
+            }
         }
         else if (currentSection == "NoiseGate")
         {
             if (key == "Threshold")
-                gateThresholdSlider.setValue(value.getDoubleValue());
+            {
+                double val = juce::jlimit(gateThresholdSlider.getMinimum(), gateThresholdSlider.getMaximum(), value.getDoubleValue());
+                gateThresholdSlider.setValue(val);
+            }
             else if (key == "Ratio")
-                gateRatioSlider.setValue(value.getDoubleValue());
+            {
+                double val = juce::jlimit(gateRatioSlider.getMinimum(), gateRatioSlider.getMaximum(), value.getDoubleValue());
+                gateRatioSlider.setValue(val);
+            }
             else if (key == "Attack")
-                gateAttackSlider.setValue(value.getDoubleValue());
+            {
+                double val = juce::jlimit(gateAttackSlider.getMinimum(), gateAttackSlider.getMaximum(), value.getDoubleValue());
+                gateAttackSlider.setValue(val);
+            }
             else if (key == "Release")
-                gateReleaseSlider.setValue(value.getDoubleValue());
+            {
+                double val = juce::jlimit(gateReleaseSlider.getMinimum(), gateReleaseSlider.getMaximum(), value.getDoubleValue());
+                gateReleaseSlider.setValue(val);
+            }
         }
         else if (currentSection == "Compressor")
         {
             if (key == "Threshold")
-                thresholdSlider.setValue(value.getDoubleValue());
+            {
+                double val = juce::jlimit(thresholdSlider.getMinimum(), thresholdSlider.getMaximum(), value.getDoubleValue());
+                thresholdSlider.setValue(val);
+            }
             else if (key == "Ratio")
-                ratioSlider.setValue(value.getDoubleValue());
+            {
+                double val = juce::jlimit(ratioSlider.getMinimum(), ratioSlider.getMaximum(), value.getDoubleValue());
+                ratioSlider.setValue(val);
+            }
             else if (key == "Attack")
-                attackSlider.setValue(value.getDoubleValue());
+            {
+                double val = juce::jlimit(attackSlider.getMinimum(), attackSlider.getMaximum(), value.getDoubleValue());
+                attackSlider.setValue(val);
+            }
             else if (key == "Release")
-                releaseSlider.setValue(value.getDoubleValue());
+            {
+                double val = juce::jlimit(releaseSlider.getMinimum(), releaseSlider.getMaximum(), value.getDoubleValue());
+                releaseSlider.setValue(val);
+            }
             else if (key == "Knee")
-                kneeSlider.setValue(value.getDoubleValue());
+            {
+                double val = juce::jlimit(kneeSlider.getMinimum(), kneeSlider.getMaximum(), value.getDoubleValue());
+                kneeSlider.setValue(val);
+            }
         }
         else if (currentSection == "Limiter")
         {
             if (key == "Ceiling")
-                ceilingSlider.setValue(value.getDoubleValue());
+            {
+                double val = juce::jlimit(ceilingSlider.getMinimum(), ceilingSlider.getMaximum(), value.getDoubleValue());
+                ceilingSlider.setValue(val);
+            }
             else if (key == "Lookahead")
-                lookaheadSlider.setValue(value.getDoubleValue());
+            {
+                double val = juce::jlimit(lookaheadSlider.getMinimum(), lookaheadSlider.getMaximum(), value.getDoubleValue());
+                lookaheadSlider.setValue(val);
+            }
             else if (key == "Release")
                 ; // Limiter release is handled by releaseSlider which is already set in Compressor section
         }
         else if (currentSection == "Output")
         {
             if (key == "Gain")
-                outputGainSlider.setValue(value.getDoubleValue() == 0.0 ? 1.0 : value.getDoubleValue());
+            {
+                double val = juce::jlimit(outputGainSlider.getMinimum(), outputGainSlider.getMaximum(), value.getDoubleValue());
+                outputGainSlider.setValue(val);
+            }
             else if (key == "MakeupGain")
-                makeupGainSlider.setValue(value.getDoubleValue());
+            {
+                double val = juce::jlimit(makeupGainSlider.getMinimum(), makeupGainSlider.getMaximum(), value.getDoubleValue());
+                makeupGainSlider.setValue(val);
+            }
         }
     }
     
@@ -731,7 +842,297 @@ bool MainComponent::loadPresetFromFile(const juce::String& presetName)
 
 juce::File MainComponent::getPresetFile(const juce::String& presetName)
 {
-    // Look for preset file in the current application directory
-    auto currentDir = juce::File::getCurrentWorkingDirectory();
-    return currentDir.getChildFile(presetName + ".preset");
+    // Get the appropriate directory for application data
+    auto appDataDir = getPresetDirectory();
+    
+    // Ensure directory exists with error checking
+    if (!appDataDir.exists())
+    {
+        if (!appDataDir.createDirectory())
+        {
+            juce::Logger::writeToLog("Error: Failed to create preset directory: " + appDataDir.getFullPathName());
+            // Fallback to temp directory if main directory creation fails
+            appDataDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                            .getChildFile("AudioBooster").getChildFile("Presets");
+            if (!appDataDir.exists() && !appDataDir.createDirectory())
+            {
+                juce::Logger::writeToLog("Error: Failed to create fallback preset directory: " + appDataDir.getFullPathName());
+            }
+        }
+    }
+    
+    return appDataDir.getChildFile(presetName + ".preset");
+}
+
+void MainComponent::refreshPresetList()
+{
+    juce::String currentSelection = presetBox.getText();
+    presetBox.clear();
+    
+    // Add default hardcoded presets
+    presetBox.addItem("Default", 1);
+    presetBox.addItem("Podcast", 2);
+    presetBox.addItem("Streaming", 3);
+    presetBox.addItem("VoiceOver", 4);
+    presetBox.addItem("SlammedUp", 5);
+    
+    // Scan for .preset files in the preset directory
+    auto presetDir = getPresetDirectory();
+    if (presetDir.exists())
+    {
+        auto presetFiles = presetDir.findChildFiles(juce::File::findFiles, false, "*.preset");
+        
+        int itemId = 6; // Start after hardcoded presets
+        for (const auto& file : presetFiles)
+        {
+            juce::String presetName = file.getFileNameWithoutExtension();
+            
+            // Skip if it's already a hardcoded preset
+            if (isBuiltInPreset(presetName))
+                continue;
+                
+            presetBox.addItem(presetName, itemId++);
+        }
+    }
+    
+    // Try to restore previous selection
+    if (currentSelection.isNotEmpty())
+    {
+        for (int i = 0; i < presetBox.getNumItems(); ++i)
+        {
+            if (presetBox.getItemText(i) == currentSelection)
+            {
+                presetBox.setSelectedItemIndex(i, juce::dontSendNotification);
+                return;
+            }
+        }
+    }
+    
+    // Default to first item if previous selection not found
+    presetBox.setSelectedId(1, juce::dontSendNotification);
+}
+
+juce::File MainComponent::getPresetDirectory()
+{
+    // Get platform-appropriate application data directory
+    auto appDataDir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory);
+    return appDataDir.getChildFile("AudioBooster").getChildFile("Presets");
+}
+
+bool MainComponent::isBuiltInPreset(const juce::String& presetName)
+{
+    return (presetName == "Default" || presetName == "Podcast" || 
+            presetName == "Streaming" || presetName == "VoiceOver" || 
+            presetName == "SlammedUp");
+}
+
+juce::String MainComponent::cleanPresetName(const juce::String& name)
+{
+    // Remove invalid characters for file names
+    juce::String cleaned = name;
+    
+    // Remove or replace invalid characters
+    cleaned = cleaned.replaceCharacters("\\/:*?\"<>|", "");
+    
+    // Trim whitespace
+    cleaned = cleaned.trim();
+    
+    // Ensure it's not empty after cleaning
+    if (cleaned.isEmpty())
+        return juce::String();
+        
+    return cleaned;
+}
+
+void MainComponent::doSavePreset(const juce::String& presetName, const juce::File& presetFile)
+{
+    // Save the preset
+    savePreset(presetName);
+    
+    if (presetFile.exists())
+    {
+        refreshPresetList();
+        
+        // Select the newly saved preset
+        for (int i = 0; i < presetBox.getNumItems(); ++i)
+        {
+            if (presetBox.getItemText(i) == presetName)
+            {
+                presetBox.setSelectedItemIndex(i, juce::dontSendNotification);
+                break;
+            }
+        }
+        
+        juce::NativeMessageBox::showMessageBoxAsync(
+            juce::AlertWindow::InfoIcon,
+            "Preset Saved",
+            "Preset saved successfully: " + presetName
+        );
+    }
+    else
+    {
+        juce::NativeMessageBox::showMessageBoxAsync(
+            juce::AlertWindow::WarningIcon,
+            "Save Failed",
+            "Failed to save preset file: " + presetName
+        );
+    }
+}
+
+void MainComponent::handleSavePresetClick()
+{
+    // Show input dialog for custom preset name
+    juce::String currentSelection = presetBox.getText();
+    juce::String defaultName = currentSelection.isNotEmpty() && !isBuiltInPreset(currentSelection) 
+        ? currentSelection : "MyPreset";
+    
+    // Use async AlertWindow for text input
+    auto* alertWindow = new juce::AlertWindow("Save Preset", "Enter a name for your preset:", juce::AlertWindow::QuestionIcon);
+    alertWindow->addTextEditor("presetName", defaultName, "Preset name:");
+    alertWindow->addButton("Save", 1, juce::KeyPress(juce::KeyPress::returnKey));
+    alertWindow->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+    
+    alertWindow->enterModalState(true, juce::ModalCallbackFunction::create([this, alertWindow](int result)
+    {
+        std::unique_ptr<juce::AlertWindow> windowDeleter(alertWindow);
+        
+        if (result == 0) // User cancelled
+            return;
+            
+        juce::String presetName = alertWindow->getTextEditorContents("presetName");
+        
+        // Check if user cancelled or entered empty name
+        if (presetName.isEmpty())
+        {
+            return;
+        }
+        
+        // Clean the name (remove invalid characters)
+        presetName = cleanPresetName(presetName);
+        
+        if (presetName.isEmpty())
+        {
+            juce::NativeMessageBox::showMessageBoxAsync(
+                juce::AlertWindow::WarningIcon,
+                "Invalid Name",
+                "Please enter a valid preset name."
+            );
+            return;
+        }
+        
+        // Check if it's a built-in preset name
+        if (isBuiltInPreset(presetName))
+        {
+            juce::NativeMessageBox::showMessageBoxAsync(
+                juce::AlertWindow::WarningIcon,
+                "Cannot Use Name",
+                "Cannot use built-in preset names. Please choose a different name."
+            );
+            return;
+        }
+        
+        auto presetFile = getPresetFile(presetName);
+        
+        // Check if file already exists and ask for confirmation
+        if (presetFile.exists())
+        {
+            auto* confirmWindow = new juce::AlertWindow("Preset Exists", 
+                "A preset with this name already exists. Do you want to overwrite it?", 
+                juce::AlertWindow::QuestionIcon);
+            confirmWindow->addButton("Yes", 1, juce::KeyPress(juce::KeyPress::returnKey));
+            confirmWindow->addButton("No", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+            
+            confirmWindow->enterModalState(true, juce::ModalCallbackFunction::create([this, confirmWindow, presetName, presetFile](int overwriteResult)
+            {
+                std::unique_ptr<juce::AlertWindow> windowDeleter(confirmWindow);
+                
+                if (overwriteResult == 0) // User said No
+                    return;
+                    
+                // Continue with save process
+                this->doSavePreset(presetName, presetFile);
+            }));
+        }
+        else
+        {
+            // File doesn't exist, save directly
+            this->doSavePreset(presetName, presetFile);
+        }
+    }));
+}
+
+void MainComponent::handleLoadPresetClick()
+{
+    // Refresh the preset list to show any new .preset files that might have been added
+    refreshPresetList();
+    
+    juce::NativeMessageBox::showMessageBoxAsync(
+        juce::AlertWindow::InfoIcon,
+        "Preset List Refreshed",
+        "Preset list has been refreshed. Select a preset from the dropdown to load it."
+    );
+}
+
+void MainComponent::handleDeletePresetClick()
+{
+    juce::String currentSelection = presetBox.getText();
+    
+    if (currentSelection.isEmpty())
+    {
+        juce::NativeMessageBox::showMessageBoxAsync(
+            juce::AlertWindow::WarningIcon,
+            "No Preset Selected",
+            "Please select a preset to delete."
+        );
+        return;
+    }
+    
+    // Don't allow deleting built-in presets
+    if (isBuiltInPreset(currentSelection))
+    {
+        juce::NativeMessageBox::showMessageBoxAsync(
+            juce::AlertWindow::WarningIcon,
+            "Cannot Delete",
+            "Built-in presets cannot be deleted. Only custom presets can be removed."
+        );
+        return;
+    }
+    
+    auto presetFile = getPresetFile(currentSelection);
+    if (!presetFile.exists())
+    {
+        juce::NativeMessageBox::showMessageBoxAsync(
+            juce::AlertWindow::WarningIcon,
+            "Preset Not Found",
+            "The preset file does not exist: " + presetFile.getFullPathName()
+        );
+        return;
+    }
+    
+    // Delete the preset file
+    if (presetFile.deleteFile())
+    {
+        refreshPresetList();
+        
+        // Select first preset after deletion
+        if (presetBox.getNumItems() > 0)
+        {
+            presetBox.setSelectedItemIndex(0, juce::dontSendNotification);
+            loadPreset(presetBox.getText());
+        }
+        
+        juce::NativeMessageBox::showMessageBoxAsync(
+            juce::AlertWindow::InfoIcon,
+            "Preset Deleted",
+            "Preset deleted successfully: " + currentSelection
+        );
+    }
+    else
+    {
+        juce::NativeMessageBox::showMessageBoxAsync(
+            juce::AlertWindow::WarningIcon,
+            "Delete Failed",
+            "Failed to delete preset file: " + presetFile.getFullPathName()
+        );
+    }
 }
