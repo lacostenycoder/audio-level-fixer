@@ -42,7 +42,7 @@ jobs:
         submodules: recursive
 
     - name: Cache CMake
-      uses: actions/cache@2cdf405574d6ef1f33a1d12acccd3ae82f47b3f2
+      uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809
       with:
         path: |
           ~/.cmake
@@ -56,7 +56,7 @@ jobs:
 
     - name: Cache APT packages (Linux)
       if: runner.os == 'Linux'
-      uses: actions/cache@2cdf405574d6ef1f33a1d12acccd3ae82f47b3f2
+      uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809
       with:
         path: /var/cache/apt
         key: ${{ runner.os }}-apt-${{ hashFiles('.github/workflows/build.yml') }}
@@ -78,7 +78,7 @@ jobs:
 
     - name: Cache Homebrew (macOS)
       if: runner.os == 'macOS'
-      uses: actions/cache@2cdf405574d6ef1f33a1d12acccd3ae82f47b3f2
+      uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809
       with:
         path: |
           ~/Library/Caches/Homebrew
