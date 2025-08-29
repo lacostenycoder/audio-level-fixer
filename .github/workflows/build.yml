@@ -1,0 +1,198 @@
+# .github/workflows/build.yml
+# Standard CMake-based build workflow
+name: Build
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false  # Don't cancel other jobs if one fails
+      matrix:
+        config:
+          - name: "Windows x64"
+            os: windows-latest
+            cmake_generator: "Visual Studio 17 2022"
+            cmake_arch: -A x64
+            artifact_name: windows-x64
+            
+          - name: "Linux x64" 
+            os: ubuntu-latest
+            cmake_generator: "Unix Makefiles"
+            cmake_arch: ""
+            artifact_name: linux-x64
+            
+          - name: "macOS Universal"
+            os: macos-latest
+            cmake_generator: "Unix Makefiles"
+            cmake_arch: -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+            artifact_name: macos-universal
+
+    runs-on: ${{ matrix.config.os }}
+    name: ${{ matrix.config.name }}
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Setup CMake
+      uses: lukka/get-cmake@latest
+
+    - name: Install Dependencies (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          libasound2-dev \
+          libpulse-dev \
+          libjack-jackd2-dev \
+          portaudio19-dev \
+          libsndfile1-dev \
+          pkg-config
+
+    - name: Install Dependencies (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        brew install portaudio libsndfile pkg-config
+
+    - name: Setup MSVC (Windows)
+      if: runner.os == 'Windows'
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Check Repository Structure
+      shell: bash
+      run: |
+        echo "=== Repository Contents ==="
+        find . -maxdepth 2 -type f | head -20
+        echo ""
+        echo "=== Looking for CMakeLists.txt ==="
+        find . -name "CMakeLists.txt"
+        echo ""
+        echo "=== Looking for source files ==="
+        find . -name "*.cpp" -o -name "*.h" -o -name "*.c" | head -10
+
+    - name: Configure CMake
+      shell: bash
+      run: |
+        cmake -B build \
+          -DCMAKE_BUILD_TYPE=Release \
+          -G "${{ matrix.config.cmake_generator }}" \
+          ${{ matrix.config.cmake_arch }}
+
+    - name: Build
+      shell: bash
+      run: |
+        cmake --build build --config Release --parallel $(nproc 2>/dev/null || echo 4)
+
+    - name: List Build Output
+      shell: bash
+      run: |
+        echo "=== Build Directory Contents ==="
+        find build -type f | head -20
+        echo ""
+        echo "=== Looking for Executables ==="
+        find build -name "*.exe" -o \( -type f -executable \) | head -10
+
+    - name: Run Tests (if available)
+      shell: bash
+      working-directory: build
+      run: |
+        if [ -f "CTestTestfile.cmake" ] || [ -f "test/CTestTestfile.cmake" ]; then
+          ctest --output-on-failure -C Release
+        else
+          echo "No tests found - skipping"
+        fi
+      continue-on-error: true
+
+    - name: Package Artifacts
+      shell: bash
+      run: |
+        # Create output directory
+        mkdir -p dist/audio-level-fixer-${{ matrix.config.artifact_name }}
+        cd dist/audio-level-fixer-${{ matrix.config.artifact_name }}
+        
+        # Copy executables
+        if [ "${{ runner.os }}" == "Windows" ]; then
+          find ../../build -name "*.exe" -exec cp {} . \; 2>/dev/null || true
+          find ../../build -name "*.dll" -exec cp {} . \; 2>/dev/null || true
+        else
+          find ../../build -type f -executable -exec cp {} . \; 2>/dev/null || true
+        fi
+        
+        # Copy preset files and documentation  
+        cp ../../*.preset . 2>/dev/null || true
+        cp ../../README.md . 2>/dev/null || true
+        cp ../../LICENSE* . 2>/dev/null || true
+        
+        # Show what we packaged
+        echo "=== Packaged Files ==="
+        ls -la
+        
+        # Create archive
+        cd ..
+        if [ "${{ runner.os }}" == "Windows" ]; then
+          7z a audio-level-fixer-${{ matrix.config.artifact_name }}.zip audio-level-fixer-${{ matrix.config.artifact_name }}/*
+        else
+          tar -czf audio-level-fixer-${{ matrix.config.artifact_name }}.tar.gz audio-level-fixer-${{ matrix.config.artifact_name }}/
+        fi
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: audio-level-fixer-${{ matrix.config.artifact_name }}
+        path: |
+          dist/*.zip
+          dist/*.tar.gz
+        retention-days: 30
+
+  # Only create release on pushes to main/master (not PRs)
+  release:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Download All Artifacts
+      uses: actions/download-artifact@v4
+    
+    - name: Display Structure
+      run: |
+        echo "Downloaded artifacts:"
+        find . -name "*.zip" -o -name "*.tar.gz"
+    
+    - name: Generate Release Notes
+      run: |
+        echo "# Audio Level Fixer - Development Build" > release-notes.md
+        echo "" >> release-notes.md
+        echo "**Build Information:**" >> release-notes.md
+        echo "- Commit: \`${{ github.sha }}\`" >> release-notes.md  
+        echo "- Date: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> release-notes.md
+        echo "- Workflow: [\#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> release-notes.md
+        echo "" >> release-notes.md
+        echo "**Platforms Built:**" >> release-notes.md
+        echo "- ?? Windows x64" >> release-notes.md
+        echo "- ?? Linux x64" >> release-notes.md  
+        echo "- ?? macOS Universal (Intel + Apple Silicon)" >> release-notes.md
+        echo "" >> release-notes.md
+        echo "> **Note:** This is an automated development build. The project is under active development." >> release-notes.md
+
+    - name: Create Development Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: dev-${{ github.run_number }}-${{ github.run_attempt }}
+        name: "Development Build #${{ github.run_number }}"
+        body_path: release-notes.md
+        prerelease: true
+        files: |
+          **/*.zip
+          **/*.tar.gz
+        fail_on_unmatched_files: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
