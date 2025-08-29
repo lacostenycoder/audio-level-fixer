@@ -52,7 +52,7 @@ jobs:
           ${{ runner.os }}-cmake-
     
     - name: Setup CMake
-      uses: lukka/get-cmake@5c7ccde04b4c5e57fc14c1fb1c94877f0b939172
+      uses: lukka/get-cmake@f3273e0bcecf2f2c0d3430de21bf02ab2752c47d
 
     - name: Cache APT packages (Linux)
       if: runner.os == 'Linux'
