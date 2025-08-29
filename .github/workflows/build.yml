@@ -53,6 +53,16 @@ jobs:
     
     - name: Setup CMake
       uses: lukka/get-cmake@f3273e0bcecf2f2c0d3430de21bf02ab2752c47d
+    
+    - name: Install JUCE Framework
+      shell: bash
+      run: |
+        cd ..
+        if [ ! -d "JUCE" ]; then
+          echo "Downloading JUCE framework..."
+          git clone --depth 1 --branch 8.0.3 https://github.com/juce-framework/JUCE.git
+        fi
+        echo "JUCE installed at: $(pwd)/JUCE"
 
     - name: Cache APT packages (Linux)
       if: runner.os == 'Linux'
