@@ -84,7 +84,18 @@ jobs:
           libjack-jackd2-dev \
           portaudio19-dev \
           libsndfile1-dev \
-          pkg-config
+          pkg-config \
+          libx11-dev \
+          libxrandr-dev \
+          libxinerama-dev \
+          libxcursor-dev \
+          libfreetype6-dev \
+          libfontconfig1-dev \
+          mesa-common-dev \
+          libasound2-dev \
+          libcurl4-openssl-dev \
+          libwebkit2gtk-4.0-dev \
+          libgtk-3-dev
 
     - name: Cache Homebrew (macOS)
       if: runner.os == 'macOS'
@@ -138,7 +149,7 @@ jobs:
         find build -type f | head -20
         echo ""
         echo "=== Looking for Executables ==="
-        find build -name "*.exe" -o \( -type f -executable \) | head -10
+        find build -name "*.exe" -o -perm -111 -type f | head -10
 
     - name: Run Tests (if available)
       shell: bash
@@ -163,7 +174,7 @@ jobs:
           find ../../build -name "*.exe" -exec cp {} . \; 2>/dev/null || true
           find ../../build -name "*.dll" -exec cp {} . \; 2>/dev/null || true
         else
-          find ../../build -type f -executable -exec cp {} . \; 2>/dev/null || true
+          find ../../build -perm -111 -type f -exec cp {} . \; 2>/dev/null || true
         fi
         
         # Copy preset files and documentation  
