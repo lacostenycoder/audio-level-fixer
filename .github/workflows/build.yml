@@ -37,13 +37,32 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871
       with:
         submodules: recursive
 
+    - name: Cache CMake
+      uses: actions/cache@2cdf405574d6ef1f33a1d12acccd3ae82f47b3f2
+      with:
+        path: |
+          ~/.cmake
+          build/_deps
+        key: ${{ runner.os }}-cmake-${{ hashFiles('**/CMakeLists.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-cmake-
+    
     - name: Setup CMake
-      uses: lukka/get-cmake@latest
+      uses: lukka/get-cmake@5c7ccde04b4c5e57fc14c1fb1c94877f0b939172
 
+    - name: Cache APT packages (Linux)
+      if: runner.os == 'Linux'
+      uses: actions/cache@2cdf405574d6ef1f33a1d12acccd3ae82f47b3f2
+      with:
+        path: /var/cache/apt
+        key: ${{ runner.os }}-apt-${{ hashFiles('.github/workflows/build.yml') }}
+        restore-keys: |
+          ${{ runner.os }}-apt-
+    
     - name: Install Dependencies (Linux)
       if: runner.os == 'Linux'
       run: |
@@ -57,6 +76,17 @@ jobs:
           libsndfile1-dev \
           pkg-config
 
+    - name: Cache Homebrew (macOS)
+      if: runner.os == 'macOS'
+      uses: actions/cache@2cdf405574d6ef1f33a1d12acccd3ae82f47b3f2
+      with:
+        path: |
+          ~/Library/Caches/Homebrew
+          /opt/homebrew/var/homebrew/locks
+        key: ${{ runner.os }}-brew-${{ hashFiles('.github/workflows/build.yml') }}
+        restore-keys: |
+          ${{ runner.os }}-brew-
+    
     - name: Install Dependencies (macOS)
       if: runner.os == 'macOS'
       run: |
@@ -64,7 +94,7 @@ jobs:
 
     - name: Setup MSVC (Windows)
       if: runner.os == 'Windows'
-      uses: microsoft/setup-msbuild@v2
+      uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce
 
     - name: Check Repository Structure
       shell: bash
@@ -89,7 +119,7 @@ jobs:
     - name: Build
       shell: bash
       run: |
-        cmake --build build --config Release --parallel $(nproc 2>/dev/null || echo 4)
+        cmake --build build --config Release --parallel
 
     - name: List Build Output
       shell: bash
@@ -109,7 +139,7 @@ jobs:
         else
           echo "No tests found - skipping"
         fi
-      continue-on-error: true
+      continue-on-error: false
 
     - name: Package Artifacts
       shell: bash
@@ -129,7 +159,7 @@ jobs:
         # Copy preset files and documentation  
         cp ../../*.preset . 2>/dev/null || true
         cp ../../README.md . 2>/dev/null || true
-        cp ../../LICENSE* . 2>/dev/null || true
+        cp ../../LICENSE* .
         
         # Show what we packaged
         echo "=== Packaged Files ==="
@@ -138,13 +168,13 @@ jobs:
         # Create archive
         cd ..
         if [ "${{ runner.os }}" == "Windows" ]; then
-          7z a audio-level-fixer-${{ matrix.config.artifact_name }}.zip audio-level-fixer-${{ matrix.config.artifact_name }}/*
+          powershell -Command "Compress-Archive -Path 'audio-level-fixer-${{ matrix.config.artifact_name }}/*' -DestinationPath 'audio-level-fixer-${{ matrix.config.artifact_name }}.zip'"
         else
           tar -czf audio-level-fixer-${{ matrix.config.artifact_name }}.tar.gz audio-level-fixer-${{ matrix.config.artifact_name }}/
         fi
 
     - name: Upload Artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882
       with:
         name: audio-level-fixer-${{ matrix.config.artifact_name }}
         path: |
@@ -160,7 +190,7 @@ jobs:
     
     steps:
     - name: Download All Artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
     
     - name: Display Structure
       run: |
@@ -177,14 +207,14 @@ jobs:
         echo "- Workflow: [\#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> release-notes.md
         echo "" >> release-notes.md
         echo "**Platforms Built:**" >> release-notes.md
-        echo "- ?? Windows x64" >> release-notes.md
-        echo "- ?? Linux x64" >> release-notes.md  
-        echo "- ?? macOS Universal (Intel + Apple Silicon)" >> release-notes.md
+        echo "- ✅ Windows x64" >> release-notes.md
+        echo "- ✅ Linux x64" >> release-notes.md  
+        echo "- ✅ macOS Universal (Intel + Apple Silicon)" >> release-notes.md
         echo "" >> release-notes.md
         echo "> **Note:** This is an automated development build. The project is under active development." >> release-notes.md
 
     - name: Create Development Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191
       with:
         tag_name: dev-${{ github.run_number }}-${{ github.run_attempt }}
         name: "Development Build #${{ github.run_number }}"
