@@ -78,18 +78,17 @@ jobs:
           chmod +x audio-level-fixer-${{ matrix.name }}/* 2>/dev/null || true
         fi
     
-    - name: Create Archive
+    - name: Install 7z (Windows only)
+      if: matrix.name == 'windows'
       shell: bash
       run: |
-        if [[ "${{ matrix.name }}" == "windows" ]]; then
-          # Install 7z if not available
-          if ! command -v 7z &> /dev/null; then
-            choco install 7zip
-          fi
-          7z a audio-level-fixer-${{ matrix.name }}.zip audio-level-fixer-${{ matrix.name }}/*
-        else
-          tar -czf audio-level-fixer-${{ matrix.name }}.tar.gz audio-level-fixer-${{ matrix.name }}/
+        if ! command -v 7z &> /dev/null; then
+          choco install 7zip
         fi
+    
+    - name: Create Archive
+      shell: bash
+      run: ${{ matrix.archive_cmd }}
     
     - name: Upload Build Artifacts
       uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882
