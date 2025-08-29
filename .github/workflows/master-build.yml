@@ -1,0 +1,141 @@
+# .github/workflows/master-build.yml
+# Simpler version - only builds on master/main branch pushes
+name: Master Build
+
+on:
+  push:
+    branches: [ master, main ]
+
+jobs:
+  build-all-platforms:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows
+            cmake_generator: "Visual Studio 17 2022"
+            cmake_arch: "-A x64"
+            executable_ext: ".exe"
+            archive_cmd: "7z a audio-level-fixer-windows.zip audio-level-fixer-windows/*"
+            
+          - os: ubuntu-latest
+            name: linux
+            cmake_generator: ""
+            cmake_arch: ""
+            executable_ext: ""
+            deps: "sudo apt-get update && sudo apt-get install -y cmake build-essential libasound2-dev libpulse-dev portaudio19-dev"
+            archive_cmd: "tar -czf audio-level-fixer-linux.tar.gz audio-level-fixer-linux/"
+            
+          - os: macos-latest
+            name: macos-universal
+            cmake_generator: ""
+            cmake_arch: "-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64"
+            executable_ext: ""
+            deps: "brew install cmake portaudio"
+            archive_cmd: "tar -czf audio-level-fixer-macos.tar.gz audio-level-fixer-macos/"
+    
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    
+    - name: Install Dependencies
+      if: matrix.deps
+      run: ${{ matrix.deps }}
+    
+    - name: Setup MSVC (Windows only)
+      if: matrix.os == 'windows-latest'
+      uses: microsoft/setup-msbuild@v1.3
+    
+    - name: Configure CMake
+      run: |
+        cmake -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_generator }} ${{ matrix.cmake_arch }}
+    
+    - name: Build
+      run: cmake --build build --config Release
+    
+    - name: Package
+      shell: bash
+      run: |
+        mkdir audio-level-fixer-${{ matrix.name }}
+        
+        # Copy executables (try different possible names)
+        find build -name "*audio-level-fixer*" -executable -type f -exec cp {} audio-level-fixer-${{ matrix.name }}/ \; 2>/dev/null || true
+        find build -name "*AudioLevelFixer*" -executable -type f -exec cp {} audio-level-fixer-${{ matrix.name }}/ \; 2>/dev/null || true
+        find build -name "*.exe" -exec cp {} audio-level-fixer-${{ matrix.name }}/ \; 2>/dev/null || true
+        find build -name "*.dll" -exec cp {} audio-level-fixer-${{ matrix.name }}/ \; 2>/dev/null || true
+        
+        # Copy preset files and documentation
+        cp *.preset audio-level-fixer-${{ matrix.name }}/ 2>/dev/null || true
+        cp README.md audio-level-fixer-${{ matrix.name }}/ 2>/dev/null || true
+        cp LICENSE.txt audio-level-fixer-${{ matrix.name }}/ 2>/dev/null || true
+        
+        # Make executables executable on Unix systems
+        if [[ "${{ matrix.os }}" != "windows-latest" ]]; then
+          chmod +x audio-level-fixer-${{ matrix.name }}/* 2>/dev/null || true
+        fi
+    
+    - name: Create Archive
+      shell: bash
+      run: |
+        if [[ "${{ matrix.name }}" == "windows" ]]; then
+          7z a audio-level-fixer-${{ matrix.name }}.zip audio-level-fixer-${{ matrix.name }}/*
+        else
+          tar -czf audio-level-fixer-${{ matrix.name }}.tar.gz audio-level-fixer-${{ matrix.name }}/
+        fi
+    
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: audio-level-fixer-${{ matrix.name }}
+        path: |
+          *.zip
+          *.tar.gz
+        retention-days: 30
+
+  create-development-release:
+    needs: build-all-platforms
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Download All Artifacts
+      uses: actions/download-artifact@v4
+    
+    - name: List Downloaded Files
+      run: find . -name "*.zip" -o -name "*.tar.gz" | head -20
+    
+    - name: Generate Release Notes
+      run: |
+        echo "# Audio Level Fixer - Development Build" > release_notes.md
+        echo "" >> release_notes.md
+        echo "**Build Information:**" >> release_notes.md
+        echo "- Build Date: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> release_notes.md
+        echo "- Commit: \`${{ github.sha }}\`" >> release_notes.md
+        echo "- Branch: \`${{ github.ref_name }}\`" >> release_notes.md
+        echo "" >> release_notes.md
+        echo "**Platforms:**" >> release_notes.md
+        echo "- ?? Windows (x64)" >> release_notes.md
+        echo "- ?? Linux (x64)" >> release_notes.md
+        echo "- ?? macOS (Universal Binary - Intel & Apple Silicon)" >> release_notes.md
+        echo "" >> release_notes.md
+        echo "**Note:** This is an automated development build. For stable releases, check the [Releases page](../../releases)." >> release_notes.md
+    
+    - name: Create Development Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: dev-build-${{ github.run_number }}
+        name: "Development Build #${{ github.run_number }}"
+        body_path: release_notes.md
+        draft: false
+        prerelease: true
+        files: |
+          **/*.zip
+          **/*.tar.gz
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
